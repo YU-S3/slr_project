@@ -1,0 +1,24 @@
+<resources>
+    <!-- Base application theme. -->
+    <style name="Base.Theme.CameraRecorder" parent="Theme.AppCompat.Light.DarkActionBar">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+    </style>
+
+    <style name="Theme.CameraRecorder" parent="Base.Theme.CameraRecorder" />
+
+    <!-- 自定义按钮样式，不使用Material Design -->
+    <style name="RoundButtonStyle">
+        <item name="android:background">@drawable/round_button_background</item>
+        <item name="android:tint">@color/white</item>
+        <item name="android:scaleType">center</item>
+    </style>
+
+    <style name="RecordButtonStyle">
+        <item name="android:background">@drawable/record_button_background</item>
+        <item name="android:tint">@color/white</item>
+        <item name="android:scaleType">center</item>
+    </style>
+</resources>
