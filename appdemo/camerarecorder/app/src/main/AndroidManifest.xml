@@ -1,20 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    AndroidManifest.xml 文件定义了应用的基本信息、组件声明以及所需权限。
+    此文件用于声明摄像头录制相关的权限和硬件要求，并配置主活动（Activity）的启动行为。
+-->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.camerarecorder">
 
-    <!-- 摄像头和音频权限 -->
+    <!-- 摄像头和音频权限：允许应用访问设备摄像头和麦克风进行视频录制 -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Android 10及以上使用媒体存储权限 -->
+    <!-- Android 10及以上使用媒体存储权限：允许应用查看视频和图片媒体文件 -->
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 
-    <!-- 对于Android 13以下的兼容性 -->
+    <!-- 对于Android 13以下的兼容性：在旧版本系统中读取外部存储内容 -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
-    <!-- 硬件特性声明 -->
+    <!-- 硬件特性声明：指定应用所需的硬件支持情况 -->
     <uses-feature
         android:name="android.hardware.camera"
         android:required="true" />
@@ -25,6 +29,7 @@
         android:name="android.hardware.microphone"
         android:required="true" />
 
+    <!-- 应用程序主体配置 -->
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -34,6 +39,7 @@
         android:supportsRtl="true"
         android:requestLegacyExternalStorage="true">
 
+        <!-- 主界面 Activity 配置 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"

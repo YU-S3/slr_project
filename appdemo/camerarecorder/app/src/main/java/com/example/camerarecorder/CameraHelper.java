@@ -36,48 +36,89 @@ import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 
+
+// 相机助手类，负责处理相机预览、录制等功能
 public class CameraHelper {
 
+    // 日志标签
     private static final String TAG = "CameraHelper";
+
+    // 上下文对象
     private final Context context;
+
+    // 纹理视图，用于显示相机预览
     private TextureView textureView;
+
+    // 相机管理器，用于访问相机设备
     private CameraManager cameraManager;
+
+    // 相机设备对象
     private CameraDevice cameraDevice;
+
+    // 相机捕获会话
     private CameraCaptureSession captureSession;
+
+    // 后台处理程序
     private Handler backgroundHandler;
+
+    // 后台线程
     private HandlerThread backgroundThread;
+
+    // 当前使用的相机ID
     private String cameraId;
+
+    // 媒体录制器
     private MediaRecorder mediaRecorder;
+
+    // 录制状态标志
     private boolean isRecording = false;
+
+    // 录制监听器
     private RecordingListener recordingListener;
+
+    // 输出视频文件
     private File outputVideoFile;
+
+    // 预览尺寸
     private Size previewSize;
+
+    // 传感器方向
     private int sensorOrientation;
+
+    // 录制监听器接口
     public interface RecordingListener {
-        void onRecordingStarted();
-        void onRecordingStopped(String filePath);
-        void onError(String error);
+        void onRecordingStarted();   // 开始录制回调
+        void onRecordingStopped(String filePath); // 停止录制回调
+        void onError(String error);  // 错误回调
     }
 
+    // 构造函数
     public CameraHelper(Context context, TextureView textureView) {
         this.context = context;
         this.textureView = textureView;
+        // 获取系统相机服务管理器
         this.cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
-        this.cameraId = getBackCameraId();
+        // 获取后置摄像头ID
+        this.cameraId = getBackCameraId(); // 默认使用后置摄像头
         Log.d(TAG, "CameraHelper initialized with cameraId: " + cameraId);
     }
 
+    // 设置录制监听器
     public void setRecordingListener(RecordingListener listener) {
         this.recordingListener = listener;
     }
 
+    // 获取后置摄像头ID
     private String getBackCameraId() {
         try {
+            // 获取所有可用相机ID列表
             String[] cameraIds = cameraManager.getCameraIdList();
             Log.d(TAG, "Available cameras: " + Arrays.toString(cameraIds));
 
             for (String cameraId : cameraIds) {
+                // 获取相机特性信息
                 CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+                // 获取镜头朝向信息
                 Integer facing = characteristics.get(CameraCharacteristics.LENS_FACING);
                 if (facing != null && facing == CameraCharacteristics.LENS_FACING_BACK) {
                     Log.d(TAG, "Found back camera: " + cameraId);
@@ -97,9 +138,13 @@ public class CameraHelper {
         Log.e(TAG, "No camera found!");
         return null;
     }
+
+    // 选择最佳预览尺寸
     private Size chooseOptimalSize() {
         try {
+            // 获取相机特性信息
             CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+            // 获取缩放流配置映射表
             StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             if (map == null) {
                 Log.e(TAG, "StreamConfigurationMap is null");
@@ -161,6 +206,7 @@ public class CameraHelper {
         }
     }
 
+    // 根据给定的尺寸选择最佳预览尺寸
     private Size chooseOptimalSize(Size[] choices, int width, int height) {
         // 收集所有长宽比大于1的尺寸（横屏模式）
         List<Size> bigEnough = new ArrayList<>();
@@ -229,6 +275,7 @@ public class CameraHelper {
 
         if (Surface.ROTATION_90 == 0 || Surface.ROTATION_270 == 0) {
             bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
+            // 设置矩形到矩形的变换
             matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL);
         }
 
@@ -236,14 +283,17 @@ public class CameraHelper {
                 (float) viewHeight / previewSize.getHeight(),
                 (float) viewWidth / previewSize.getWidth());
 
+        // 应用缩放变换
         matrix.postScale(scale, scale, centerX, centerY);
 
         // 考虑传感器方向
         matrix.postRotate(0, centerX, centerY);
 
+        // 设置TextureView的变换矩阵
         textureView.setTransform(matrix);
     }
 
+    // 按面积比较尺寸大小的比较器
     static class CompareSizesByArea implements Comparator<Size> {
         @Override
         public int compare(Size lhs, Size rhs) {
@@ -252,16 +302,21 @@ public class CameraHelper {
         }
     }
 
+    // 切换摄像头
     public void switchCamera() {
         try {
+            // 关闭当前相机session
             closeCameraSession();
 
+            // 获取所有相机ID
             String[] cameraIds = cameraManager.getCameraIdList();
             if (cameraIds.length > 1) {
+                // 切换到另一个摄像头
                 String newCameraId = cameraId.equals(getBackCameraId()) ? getFrontCameraId() : getBackCameraId();
                 if (newCameraId != null) {
                     cameraId = newCameraId;
                     Log.d(TAG, "Switching to camera: " + cameraId);
+                    // 延迟打开新相机
                     backgroundHandler.postDelayed(this::openCamera, 500);
                 }
             }
@@ -273,10 +328,14 @@ public class CameraHelper {
         }
     }
 
+    // 获取前置摄像头ID
     private String getFrontCameraId() {
         try {
+            // 遍历所有相机ID查找前置摄像头
             for (String cameraId : cameraManager.getCameraIdList()) {
+                // 获取相机特性信息
                 CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+                // 获取镜头朝向信息
                 Integer facing = characteristics.get(CameraCharacteristics.LENS_FACING);
                 if (facing != null && facing == CameraCharacteristics.LENS_FACING_FRONT) {
                     return cameraId;
@@ -288,6 +347,7 @@ public class CameraHelper {
         return null;
     }
 
+    // 打开相机
     public void openCamera() {
         if (cameraId == null) {
             Log.e(TAG, "No camera ID available");
@@ -298,6 +358,7 @@ public class CameraHelper {
         }
 
         try {
+            // 检查相机权限
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
                     != PackageManager.PERMISSION_GRANTED) {
                 Log.e(TAG, "Camera permission not granted");
@@ -308,11 +369,13 @@ public class CameraHelper {
             }
 
             Log.d(TAG, "Opening camera: " + cameraId);
+            // 异步打开相机设备
             cameraManager.openCamera(cameraId, new CameraDevice.StateCallback() {
                 @Override
                 public void onOpened(@NonNull CameraDevice camera) {
                     Log.d(TAG, "Camera opened successfully");
                     cameraDevice = camera;
+                    // 创建相机预览
                     createCameraPreview();
                 }
 
@@ -344,6 +407,7 @@ public class CameraHelper {
         }
     }
 
+    // 获取相机错误信息
     private String getCameraErrorMessage(int error) {
         switch (error) {
             case CameraDevice.StateCallback.ERROR_CAMERA_IN_USE:
@@ -361,6 +425,7 @@ public class CameraHelper {
         }
     }
 
+    // 创建相机预览
     private void createCameraPreview() {
         if (cameraDevice == null) {
             Log.e(TAG, "Camera device is null, cannot create preview");
@@ -368,6 +433,7 @@ public class CameraHelper {
         }
 
         try {
+            // 获取SurfaceTexture对象
             SurfaceTexture texture = textureView.getSurfaceTexture();
             if (texture == null) {
                 Log.e(TAG, "SurfaceTexture is null");
@@ -387,16 +453,20 @@ public class CameraHelper {
                 configureTransform(viewWidth, viewHeight);
             }
 
+            // 创建Surface对象
             Surface surface = new Surface(texture);
 
+            // 创建预览请求构建器
             CaptureRequest.Builder previewRequestBuilder =
                     cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+            // 添加目标Surface
             previewRequestBuilder.addTarget(surface);
 
             // 使用自动模式
             previewRequestBuilder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
             previewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
 
+            // 创建捕获会话
             cameraDevice.createCaptureSession(Collections.singletonList(surface),
                     new CameraCaptureSession.StateCallback() {
                         @Override
@@ -408,6 +478,7 @@ public class CameraHelper {
 
                             captureSession = session;
                             try {
+                                // 设置重复请求以持续预览
                                 session.setRepeatingRequest(previewRequestBuilder.build(), null, backgroundHandler);
                                 Log.d(TAG, "Camera preview started successfully");
                             } catch (CameraAccessException e) {
@@ -432,6 +503,7 @@ public class CameraHelper {
     }
 
 
+    // 开始录制
     public boolean startRecording() {
         if (isRecording) {
             Log.w(TAG, "Already recording");
@@ -447,7 +519,7 @@ public class CameraHelper {
         }
 
         try {
-            // 检查权限
+            // 检查录音权限
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
                     != PackageManager.PERMISSION_GRANTED) {
                 Log.e(TAG, "Audio recording permission not granted");
@@ -457,6 +529,7 @@ public class CameraHelper {
                 return false;
             }
 
+            // 检查存储权限
             if (!checkStoragePermission()) {
                 Log.e(TAG, "Storage permission not granted");
                 if (recordingListener != null) {
@@ -490,8 +563,10 @@ public class CameraHelper {
 
             int width = Math.max(textureView.getWidth(), 640);
             int height = Math.max(textureView.getHeight(), 480);
+            // 设置默认缓冲区大小
             texture.setDefaultBufferSize(width, height);
 
+            // 创建预览Surface和录制Surface
             Surface previewSurface = new Surface(texture);
             Surface recorderSurface = mediaRecorder.getSurface();
 
@@ -499,7 +574,7 @@ public class CameraHelper {
             surfaces.add(previewSurface);
             surfaces.add(recorderSurface);
 
-            // 创建录制请求
+            // 创建录制请求构建器
             CaptureRequest.Builder recordingRequestBuilder =
                     cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
             recordingRequestBuilder.addTarget(previewSurface);
@@ -514,7 +589,9 @@ public class CameraHelper {
                             Log.d(TAG, "Recording session configured successfully");
                             captureSession = session;
                             try {
+                                // 启动录制
                                 mediaRecorder.start();
+                                // 设置重复请求以持续录制
                                 session.setRepeatingRequest(recordingRequestBuilder.build(), null, backgroundHandler);
                                 isRecording = true;
                                 Log.d(TAG, "Recording started successfully");
@@ -559,6 +636,7 @@ public class CameraHelper {
         }
     }
 
+    // 检查存储权限
     private boolean checkStoragePermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -574,6 +652,7 @@ public class CameraHelper {
         }
     }
 
+    // 设置媒体录制器
     private void setupMediaRecorder() throws IOException {
         // 完全重置MediaRecorder
         if (mediaRecorder != null) {
@@ -588,12 +667,17 @@ public class CameraHelper {
         }
 
         // 使用最兼容的设置
+        // 设置音频源为摄像机模式
         mediaRecorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER); // 使用CAMCORDER而不是MIC，兼容性更好
+        // 设置视频源为Surface
         mediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
+        // 设置输出格式为MPEG-4
         mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
 
         // 设置编码器 - 使用最兼容的设置
+        // 设置视频编码器为H.264
         mediaRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
+        // 设置音频编码器为AAC
         mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
 
         // 使用较低的参数确保兼容性
@@ -603,12 +687,14 @@ public class CameraHelper {
 
         // 设置输出文件
         outputVideoFile = createVideoFile();
+        // 设置输出文件路径
         mediaRecorder.setOutputFile(outputVideoFile.getAbsolutePath());
 
         // 设置方向（可选）
         mediaRecorder.setOrientationHint(90);
 
         try {
+            // 准备录制器
             mediaRecorder.prepare();
             Log.d(TAG, "MediaRecorder prepared successfully for file: " + outputVideoFile.getAbsolutePath());
         } catch (IOException e) {
@@ -620,15 +706,19 @@ public class CameraHelper {
         }
     }
 
+    // 创建视频文件
     private File createVideoFile() {
         File mediaDir;
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10及以上使用应用专属目录
             mediaDir = new File(context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "CameraRecorder");
         } else {
             if (Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) {
+                // 外部存储可用时使用公共目录
                 mediaDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "CameraRecorder");
             } else {
+                // 否则使用应用内部目录
                 mediaDir = new File(context.getFilesDir(), "CameraRecorder");
             }
         }
@@ -641,6 +731,7 @@ public class CameraHelper {
             }
         }
 
+        // 生成时间戳
         String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
         File videoFile = new File(mediaDir, "VID_" + timeStamp + ".mp4");
         Log.d(TAG, "Video file path: " + videoFile.getAbsolutePath());
@@ -648,6 +739,7 @@ public class CameraHelper {
         return videoFile;
     }
 
+    // 停止录制
     public void stopRecording() {
         if (!isRecording) {
             Log.w(TAG, "Not recording, cannot stop");
@@ -660,11 +752,14 @@ public class CameraHelper {
 
             if (mediaRecorder != null) {
                 try {
+                    // 停止录制
                     mediaRecorder.stop();
                 } catch (Exception e) {
                     Log.e(TAG, "Error stopping MediaRecorder", e);
                 }
+                // 重置录制器
                 mediaRecorder.reset();
+                // 释放录制器资源
                 mediaRecorder.release();
                 mediaRecorder = null;
             }
@@ -695,22 +790,26 @@ public class CameraHelper {
         }
     }
 
+    // 关闭相机会话
     private void closeCameraSession() {
         Log.d(TAG, "Closing camera session");
         isRecording = false;
 
         if (captureSession != null) {
+            // 关闭捕获会话
             captureSession.close();
             captureSession = null;
         }
 
         if (cameraDevice != null) {
+            // 关闭相机设备
             cameraDevice.close();
             cameraDevice = null;
         }
 
         if (mediaRecorder != null) {
             try {
+                // 释放录制器资源
                 mediaRecorder.release();
             } catch (Exception e) {
                 Log.e(TAG, "Error releasing MediaRecorder", e);
@@ -719,26 +818,34 @@ public class CameraHelper {
         }
     }
 
+    // 关闭相机
     public void closeCamera() {
         Log.d(TAG, "Closing camera");
         closeCameraSession();
     }
 
+    // 启动后台线程
     public void startBackgroundThread() {
         if (backgroundThread == null) {
+            // 创建后台线程
             backgroundThread = new HandlerThread("CameraBackground");
+            // 启动线程
             backgroundThread.start();
+            // 创建处理程序
             backgroundHandler = new Handler(backgroundThread.getLooper());
             Log.d(TAG, "Background thread started");
         }
     }
 
+    // 停止后台线程
     public void stopBackgroundThread() {
         if (backgroundThread != null) {
             Log.d(TAG, "Stopping background thread");
             closeCameraSession();
+            // 安全退出线程
             backgroundThread.quitSafely();
             try {
+                // 等待线程结束
                 backgroundThread.join();
                 backgroundThread = null;
                 backgroundHandler = null;
@@ -748,14 +855,17 @@ public class CameraHelper {
         }
     }
 
+    // 获取SurfaceTexture监听器
     public TextureView.SurfaceTextureListener getSurfaceTextureListener() {
         return surfaceTextureListener;
     }
 
+    // SurfaceTexture监听器实现
     private TextureView.SurfaceTextureListener surfaceTextureListener = new TextureView.SurfaceTextureListener() {
         @Override
         public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
             Log.d(TAG, "SurfaceTexture available: " + width + "x" + height);
+            // 当SurfaceTexture可用时打开相机
             openCamera();
         }
 
@@ -776,6 +886,7 @@ public class CameraHelper {
         }
     };
 
+    // 检查是否正在录制
     public boolean isRecording() {
         return isRecording;
     }
