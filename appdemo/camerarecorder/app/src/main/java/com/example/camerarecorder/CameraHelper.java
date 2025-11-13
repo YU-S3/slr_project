@@ -140,71 +140,52 @@ public class CameraHelper {
     }
 
     // 选择最佳预览尺寸
-    private Size chooseOptimalSize() {
-        try {
-            // 获取相机特性信息
-            CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
-            // 获取缩放流配置映射表
-            StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-            if (map == null) {
-                Log.e(TAG, "StreamConfigurationMap is null");
-                return new Size(1920, 1080); // 默认返回1080p
-            }
+// 选择最佳预览尺寸
+private Size chooseOptimalSize() {
+    try {
+        // 获取相机特性信息
+        CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+        // 获取缩放流配置映射表
+        StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+        if (map == null) {
+            Log.e(TAG, "StreamConfigurationMap is null");
+            return new Size(1920, 1080); // 默认返回1080p
+        }
 
-            // 获取摄像头支持的输出尺寸
-            Size[] outputSizes = map.getOutputSizes(SurfaceTexture.class);
-            if (outputSizes == null || outputSizes.length == 0) {
-                Log.e(TAG, "No output sizes available");
-                return new Size(1920, 1080);
-            }
-
-            int textureWidth = textureView.getWidth();
-            int textureHeight = textureView.getHeight();
-
-            Log.d(TAG, "TextureView size: " + textureWidth + "x" + textureHeight);
-
-            // 如果TextureView还没有测量完成，使用默认尺寸
-            if (textureWidth == 0 || textureHeight == 0) {
-                textureWidth = 1920;
-                textureHeight = 1080;
-            }
-
-            // 获取摄像头传感器方向
-            sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
-            Log.d(TAG, "Sensor orientation: " + sensorOrientation);
-
-            // 是否需要交换宽高（针对前置摄像头）
-            boolean swapDimensions = false;
-            int displayRotation = 0; // 假设竖屏
-
-            switch (sensorOrientation) {
-                case 90:
-                case 270:
-                    swapDimensions = true;
-                    break;
-            }
-
-            int displayWidth = textureWidth;
-            int displayHeight = textureHeight;
-
-            if (swapDimensions) {
-                displayWidth = textureHeight;
-                displayHeight = textureWidth;
-            }
-
-            Log.d(TAG, "Adjusted display size: " + displayWidth + "x" + displayHeight);
-
-            // 选择最匹配的预览尺寸
-            Size optimalSize = chooseOptimalSize(outputSizes, displayWidth, displayHeight);
-            Log.d(TAG, "Selected preview size: " + optimalSize.getWidth() + "x" + optimalSize.getHeight());
-
-            return optimalSize;
-
-        } catch (CameraAccessException e) {
-            Log.e(TAG, "Error choosing optimal size", e);
+        // 获取摄像头支持的输出尺寸
+        Size[] outputSizes = map.getOutputSizes(SurfaceTexture.class);
+        if (outputSizes == null || outputSizes.length == 0) {
+            Log.e(TAG, "No output sizes available");
             return new Size(1920, 1080);
         }
+
+        int textureWidth = textureView.getWidth();
+        int textureHeight = textureView.getHeight();
+
+        Log.d(TAG, "TextureView size: " + textureWidth + "x" + textureHeight);
+
+        // 如果TextureView还没有测量完成，使用默认尺寸
+        if (textureWidth == 0 || textureHeight == 0) {
+            textureWidth = 1920;
+            textureHeight = 1080;
+        }
+
+        // 获取摄像头传感器方向
+        sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+        Log.d(TAG, "Sensor orientation: " + sensorOrientation);
+
+        // 根据屏幕比例选择最合适的预览尺寸
+        Size optimalSize = chooseOptimalSize(outputSizes, textureWidth, textureHeight);
+        Log.d(TAG, "Selected preview size: " + optimalSize.getWidth() + "x" + optimalSize.getHeight());
+
+        return optimalSize;
+
+    } catch (CameraAccessException e) {
+        Log.e(TAG, "Error choosing optimal size", e);
+        return new Size(1920, 1080);
     }
+}
+
 
     // 根据给定的尺寸选择最佳预览尺寸
     private Size chooseOptimalSize(Size[] choices, int width, int height) {
@@ -261,37 +242,32 @@ public class CameraHelper {
     }
 
     // 调整TextureView的变换矩阵以适应预览比例
-    private void configureTransform(int viewWidth, int viewHeight) {
-        if (textureView == null || previewSize == null) {
-            return;
-        }
-
-        Matrix matrix = new Matrix();
-        RectF viewRect = new RectF(0, 0, viewWidth, viewHeight);
-        RectF bufferRect = new RectF(0, 0, previewSize.getHeight(), previewSize.getWidth());
-
-        float centerX = viewRect.centerX();
-        float centerY = viewRect.centerY();
-
-        if (Surface.ROTATION_90 == 0 || Surface.ROTATION_270 == 0) {
-            bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
-            // 设置矩形到矩形的变换
-            matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL);
-        }
-
-        float scale = Math.max(
-                (float) viewHeight / previewSize.getHeight(),
-                (float) viewWidth / previewSize.getWidth());
-
-        // 应用缩放变换
-        matrix.postScale(scale, scale, centerX, centerY);
-
-        // 考虑传感器方向
-        matrix.postRotate(0, centerX, centerY);
-
-        // 设置TextureView的变换矩阵
-        textureView.setTransform(matrix);
+// 调整TextureView的变换矩阵以适应预览比例
+private void configureTransform(int viewWidth, int viewHeight) {
+    if (textureView == null || previewSize == null) {
+        return;
     }
+
+    Matrix matrix = new Matrix();
+    RectF viewRect = new RectF(0, 0, viewWidth, viewHeight);
+    RectF bufferRect = new RectF(0, 0, previewSize.getWidth(), previewSize.getHeight());
+
+    float centerX = viewRect.centerX();
+    float centerY = viewRect.centerY();
+
+    // 考虑传感器方向
+    if (Surface.ROTATION_90 == 0 || Surface.ROTATION_270 == 0) {
+        bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
+        matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL);
+    }
+
+    // 根据传感器方向旋转
+    matrix.postRotate(90 * (sensorOrientation / 90), centerX, centerY);
+
+    // 应用变换
+    textureView.setTransform(matrix);
+}
+
 
     // 按面积比较尺寸大小的比较器
     static class CompareSizesByArea implements Comparator<Size> {
@@ -453,6 +429,7 @@ public class CameraHelper {
                 configureTransform(viewWidth, viewHeight);
             }
 
+
             // 创建Surface对象
             Surface surface = new Surface(texture);
 
@@ -482,7 +459,10 @@ public class CameraHelper {
                                 session.setRepeatingRequest(previewRequestBuilder.build(), null, backgroundHandler);
                                 Log.d(TAG, "Camera preview started successfully");
                             } catch (CameraAccessException e) {
-                                Log.e(TAG, "Error starting camera preview", e);
+                                Log.e(TAG, "Error creating camera preview", e);
+                                if (recordingListener != null) {
+                                    recordingListener.onError("创建摄像头预览失败");
+                                }
                             }
                         }
 
@@ -860,31 +840,34 @@ public class CameraHelper {
         return surfaceTextureListener;
     }
 
-    // SurfaceTexture监听器实现
-    private TextureView.SurfaceTextureListener surfaceTextureListener = new TextureView.SurfaceTextureListener() {
-        @Override
-        public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-            Log.d(TAG, "SurfaceTexture available: " + width + "x" + height);
-            // 当SurfaceTexture可用时打开相机
-            openCamera();
-        }
+// SurfaceTexture监听器实现
+private TextureView.SurfaceTextureListener surfaceTextureListener = new TextureView.SurfaceTextureListener() {
+    @Override
+    public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
+        Log.d(TAG, "SurfaceTexture available: " + width + "x" + height);
+        // 当SurfaceTexture可用时打开相机
+        openCamera();
+    }
 
-        @Override
-        public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
-            Log.d(TAG, "SurfaceTexture size changed: " + width + "x" + height);
-        }
+    @Override
+    public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
+        Log.d(TAG, "SurfaceTexture size changed: " + width + "x" + height);
+        // 尺寸改变时重新配置变换
+        configureTransform(width, height);
+    }
 
-        @Override
-        public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
-            Log.d(TAG, "SurfaceTexture destroyed");
-            return false;
-        }
+    @Override
+    public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
+        Log.d(TAG, "SurfaceTexture destroyed");
+        return true;
+    }
 
-        @Override
-        public void onSurfaceTextureUpdated(SurfaceTexture surface) {
-            // 纹理更新
-        }
-    };
+    @Override
+    public void onSurfaceTextureUpdated(SurfaceTexture surface) {
+        // 纹理更新
+    }
+};
+
 
     // 检查是否正在录制
     public boolean isRecording() {

@@ -4,6 +4,7 @@
     此文件用于声明摄像头录制相关的权限和硬件要求，并配置主活动（Activity）的启动行为。
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.example.camerarecorder">
 
     <!-- 摄像头和音频权限：允许应用访问设备摄像头和麦克风进行视频录制 -->
@@ -39,29 +40,30 @@
         android:supportsRtl="true"
         android:requestLegacyExternalStorage="true">
 
-        <!-- 主界面 Activity 配置 -->
-        <activity
-            android:name=".MainActivity"
-            android:exported="false"
-            android:launchMode="singleTop"
-            android:screenOrientation="fullSensor"
-            android:configChanges="orientation|screenSize|keyboardHidden">
-        </activity>
+<!-- 主界面 Activity 配置 -->
+<activity
+    android:name=".MainActivity"
+    android:exported="false"
+    android:launchMode="singleTop"
+    android:screenOrientation="fullSensor"
+    android:configChanges="orientation|screenSize|keyboardHidden"
+    android:theme="@style/Theme.Camerarecorder.FullScreen" />
 
-        <activity
-            android:name=".SplashActivity"
-            android:theme="@style/Theme.AppCompat.Light.NoActionBar"
-        android:exported="true">
-        <intent-filter>
-            <action android:name="android.intent.action.MAIN" />
-            <category android:name="android.intent.category.LAUNCHER" />
-        </intent-filter>
-    </activity>
+<activity
+    android:name=".SplashActivity"
+    android:theme="@style/Theme.AppCompat.Light.NoActionBar"
+    android:exported="true">
+    <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+    </intent-filter>
+</activity>
 
+<activity
+    android:name=".SelectionActivity"
+    android:exported="false"
+    android:theme="@style/Theme.Camerarecorder.FullScreen" />
 
-        <activity
-            android:name=".SelectionActivity"
-            android:exported="false" />
 
 
     </application>

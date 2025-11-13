@@ -4,35 +4,37 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:gravity="center"
-    android:padding="16dp"
+    android:padding="32dp"
     android:background="@color/white">
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="请选择功能"
-        android:textSize="24sp"
+        android:textSize="28sp"
         android:textStyle="bold"
-        android:layout_marginBottom="32dp"
+        android:layout_marginBottom="48dp"
         android:textColor="@color/black" />
 
     <Button
         android:id="@+id/btn_option1"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:background="@drawable/round_button_background"
-        android:padding="16dp"
+        android:layout_marginBottom="24dp"
+        android:background="@drawable/selector_button_background"
+        android:padding="20dp"
         android:text="手语翻译"
-        android:textSize="18sp" />
+        android:textSize="20sp"
+        android:stateListAnimator="@animator/button_elevation" />
 
     <Button
         android:id="@+id/btn_option2"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="其他功能"
-        android:textSize="18sp"
-        android:padding="16dp"
-        android:background="@drawable/round_button_background" />
+        android:textSize="20sp"
+        android:padding="20dp"
+        android:background="@drawable/selector_button_background"
+        android:stateListAnimator="@animator/button_elevation" />
 
 </LinearLayout>
