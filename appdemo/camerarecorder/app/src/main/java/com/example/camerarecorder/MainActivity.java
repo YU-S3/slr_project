@@ -7,7 +7,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.view.TextureView;
-import android.widget.Button;
+import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.annotation.NonNull;
@@ -28,7 +28,7 @@ public class MainActivity extends AppCompatActivity {
     private TextureView textureView;
 
     // UI组件：录制按钮和切换摄像头按钮
-    private Button btnRecord, btnSwitch;
+    private ImageButton btnRecord, btnSwitch;
 
     // UI组件：状态文本显示当前操作状态
     private TextView tvStatus;
@@ -55,6 +55,9 @@ public class MainActivity extends AppCompatActivity {
         btnRecord = findViewById(R.id.btnRecord);
         btnSwitch = findViewById(R.id.btnSwitch);
         tvStatus = findViewById(R.id.tvStatus);
+
+        // 设置录制按钮初始状态为未激活（灰色）
+        btnRecord.setImageResource(R.drawable.ic_record_inactive);
 
         // 录制按钮点击事件处理
         btnRecord.setOnClickListener(v -> toggleRecording());
@@ -194,8 +197,9 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onRecordingStarted() {
                 runOnUiThread(() -> {
-                    tvStatus.setText("录制中...");
-                    btnRecord.setText("停止录制");
+                    tvStatus.setText("识别中");
+                    // 设置录制按钮为激活状态（红色）
+                    btnRecord.setImageResource(R.drawable.ic_record_active);
                     btnSwitch.setEnabled(false);
                     isRecording = true;
                 });
@@ -204,8 +208,9 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onRecordingStopped(String filePath) {
                 runOnUiThread(() -> {
-                    tvStatus.setText("录制完成");
-                    btnRecord.setText("开始录制");
+                    tvStatus.setText("未识别");
+                    // 设置录制按钮为未激活状态（灰色）
+                    btnRecord.setImageResource(R.drawable.ic_record_inactive);
                     btnSwitch.setEnabled(true);
                     isRecording = false;
                     Toast.makeText(MainActivity.this, "视频已保存", Toast.LENGTH_SHORT).show();
@@ -216,7 +221,8 @@ public class MainActivity extends AppCompatActivity {
             public void onError(String error) {
                 runOnUiThread(() -> {
                     tvStatus.setText("错误: " + error);
-                    btnRecord.setText("开始录制");
+                    // 设置录制按钮为未激活状态（灰色）
+                    btnRecord.setImageResource(R.drawable.ic_record_inactive);
                     btnSwitch.setEnabled(true);
                     isRecording = false;
 
@@ -233,7 +239,9 @@ public class MainActivity extends AppCompatActivity {
         // 启用控制按钮并更新状态信息
         btnRecord.setEnabled(true);
         btnSwitch.setEnabled(true);
-        tvStatus.setText("准备就绪");
+        // 设置录制按钮初始状态为未激活（灰色）
+        btnRecord.setImageResource(R.drawable.ic_record_inactive);
+        tvStatus.setText("未识别");
     }
 
     // 控制录制开始或结束

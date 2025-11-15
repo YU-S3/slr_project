@@ -9,13 +9,26 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:background="@android:color/black">
+        android:background="@color/black">
 
         <TextureView
             android:id="@+id/textureView"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:layout_gravity="center" />
+
+        <!-- 状态显示 -->
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="未识别"
+            android:layout_gravity="center_horizontal|top"
+            android:layout_marginTop="16dp"
+            android:padding="8dp"
+            android:background="#33808080"
+            android:textSize="16sp"
+            android:textColor="@android:color/white" />
 
     </FrameLayout>
 
@@ -25,34 +38,29 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center"
-        android:padding="16dp">
+        android:padding="16dp"
+        android:background="@color/black">
 
-        <Button
+        <ImageButton
             android:id="@+id/btnRecord"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="开始录制"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
             android:layout_margin="12dp"
-            android:padding="16dp" />
+            android:padding="16dp"
+            android:background="@drawable/circular_record_button_background"
+            android:src="@drawable/ic_record_inactive"
+            android:contentDescription="录制按钮" />
 
-        <Button
+        <ImageButton
             android:id="@+id/btnSwitch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="切换摄像头"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
             android:layout_margin="12dp"
-            android:padding="16dp" />
+            android:padding="16dp"
+            android:background="@drawable/circular_button_background"
+            android:src="@drawable/ic_switch_camera"
+            android:contentDescription="切换摄像头按钮" />
 
     </LinearLayout>
-
-    <!-- 状态显示 -->
-    <TextView
-        android:id="@+id/tvStatus"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="准备就绪"
-        android:gravity="center"
-        android:padding="12dp"
-        android:textSize="16sp" />
 
 </LinearLayout>

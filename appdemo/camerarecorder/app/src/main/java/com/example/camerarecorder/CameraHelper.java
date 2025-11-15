@@ -25,6 +25,8 @@ import android.view.Surface;
 import android.view.TextureView;
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
+import android.view.WindowManager;
+
 
 import java.io.File;
 import java.io.IOException;
@@ -243,6 +245,8 @@ private Size chooseOptimalSize() {
 
     // 调整TextureView的变换矩阵以适应预览比例
 // 调整TextureView的变换矩阵以适应预览比例
+// 在 CameraHelper 类中替换 configureTransform 方法
+// 替换整个 configureTransform 方法
 private void configureTransform(int viewWidth, int viewHeight) {
     if (textureView == null || previewSize == null) {
         return;
@@ -250,23 +254,42 @@ private void configureTransform(int viewWidth, int viewHeight) {
 
     Matrix matrix = new Matrix();
     RectF viewRect = new RectF(0, 0, viewWidth, viewHeight);
-    RectF bufferRect = new RectF(0, 0, previewSize.getWidth(), previewSize.getHeight());
+    RectF bufferRect = new RectF(0, 0, previewSize.getHeight(), previewSize.getWidth());
 
     float centerX = viewRect.centerX();
     float centerY = viewRect.centerY();
 
-    // 考虑传感器方向
-    if (Surface.ROTATION_90 == 0 || Surface.ROTATION_270 == 0) {
-        bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
-        matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL);
+    // 获取设备当前旋转角度
+    int rotation = getWindowManagerRotation(textureView.getContext());
+
+    // 计算需要旋转的角度，改为左旋转90度（减去90度）
+    int rotate = (sensorOrientation + rotation * 90 - 90) % 360;
+    // 处理负数情况
+    if (rotate < 0) {
+        rotate += 360;
     }
 
-    // 根据传感器方向旋转
-    matrix.postRotate(90 * (sensorOrientation / 90), centerX, centerY);
+    // 根据旋转角度调整 bufferRect
+    if (rotate == 90 || rotate == 270) {
+        bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
+        matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL);
 
-    // 应用变换
+        // 计算缩放比例
+        float scale = Math.max(
+                (float) viewHeight / (float) previewSize.getHeight(),
+                (float) viewWidth / (float) previewSize.getWidth());
+        matrix.postScale(scale, scale, centerX, centerY);
+    }
+
+    // 应用旋转
+    matrix.postRotate(rotate, centerX, centerY);
+
     textureView.setTransform(matrix);
 }
+
+
+
+
 
 
     // 按面积比较尺寸大小的比较器
@@ -458,6 +481,11 @@ private void configureTransform(int viewWidth, int viewHeight) {
                                 // 设置重复请求以持续预览
                                 session.setRepeatingRequest(previewRequestBuilder.build(), null, backgroundHandler);
                                 Log.d(TAG, "Camera preview started successfully");
+
+                                // 配置变换
+                                if (textureView.getWidth() > 0 && textureView.getHeight() > 0) {
+                                    configureTransform(textureView.getWidth(), textureView.getHeight());
+                                }
                             } catch (CameraAccessException e) {
                                 Log.e(TAG, "Error creating camera preview", e);
                                 if (recordingListener != null) {
@@ -673,6 +701,24 @@ private void configureTransform(int viewWidth, int viewHeight) {
         // 设置方向（可选）
         mediaRecorder.setOrientationHint(90);
 
+
+// 获取设备当前方向
+int rotation = getWindowManagerRotation(context);
+int degrees = rotation * 90;
+
+// 计算正确的方向提示，改为左旋转90度（减去90度）
+int orientationHint = (sensorOrientation + degrees - 90) % 360;
+// 处理负数情况
+if (orientationHint < 0) {
+    orientationHint += 360;
+}
+// 确保是正确的角度（0, 90, 180, 270）
+orientationHint = (orientationHint + 360) % 360;
+
+mediaRecorder.setOrientationHint(orientationHint);
+
+
+
         try {
             // 准备录制器
             mediaRecorder.prepare();
@@ -850,11 +896,12 @@ private TextureView.SurfaceTextureListener surfaceTextureListener = new TextureV
     }
 
     @Override
-    public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
-        Log.d(TAG, "SurfaceTexture size changed: " + width + "x" + height);
-        // 尺寸改变时重新配置变换
-        configureTransform(width, height);
-    }
+public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
+    Log.d(TAG, "SurfaceTexture size changed: " + width + "x" + height);
+    // 尺寸改变时重新配置变换
+    configureTransform(width, height);
+}
+
 
     @Override
     public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
@@ -873,4 +920,27 @@ private TextureView.SurfaceTextureListener surfaceTextureListener = new TextureV
     public boolean isRecording() {
         return isRecording;
     }
+
+// 确认该方法存在且正确实现
+@SuppressWarnings("deprecation")
+private int getWindowManagerRotation(Context context) {
+    WindowManager windowManager = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+    int rotation;
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        rotation = context.getDisplay().getRotation();
+    } else {
+        rotation = windowManager.getDefaultDisplay().getRotation();
+    }
+
+    // 将 Surface.ROTATION_* 转换为 0,1,2,3 的数值
+    switch (rotation) {
+        case Surface.ROTATION_0: return 0;
+        case Surface.ROTATION_90: return 1;
+        case Surface.ROTATION_180: return 2;
+        case Surface.ROTATION_270: return 3;
+        default: return 0;
+    }
+}
+
+
 }
