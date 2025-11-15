@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
@@ -30,37 +31,42 @@
             android:textSize="16sp"
             android:textColor="@android:color/white" />
 
+        <!-- 控制按钮区域 -->
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:padding="16dp">
+
+            <!-- 录制按钮 - 缩小至0.5倍 -->
+            <ImageButton
+                android:id="@+id/btnRecord"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:padding="8dp"
+                android:background="@drawable/circular_record_button_background"
+                android:src="@drawable/ic_record_inactive_large"
+                android:contentDescription="录制按钮"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent" />
+
+            <!-- 翻转摄像头按钮 - 位于右面1/5处 -->
+            <ImageButton
+                android:id="@+id/btnSwitch"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:padding="16dp"
+                android:background="@drawable/circular_button_background"
+                android:src="@drawable/ic_switch_camera"
+                android:contentDescription="切换摄像头按钮"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintHorizontal_bias="0.8" />
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
+
     </FrameLayout>
-
-    <!-- 控制按钮区域 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center"
-        android:padding="16dp"
-        android:background="@color/black">
-
-        <ImageButton
-            android:id="@+id/btnRecord"
-            android:layout_width="72dp"
-            android:layout_height="72dp"
-            android:layout_margin="12dp"
-            android:padding="16dp"
-            android:background="@drawable/circular_record_button_background"
-            android:src="@drawable/ic_record_inactive"
-            android:contentDescription="录制按钮" />
-
-        <ImageButton
-            android:id="@+id/btnSwitch"
-            android:layout_width="72dp"
-            android:layout_height="72dp"
-            android:layout_margin="12dp"
-            android:padding="16dp"
-            android:background="@drawable/circular_button_background"
-            android:src="@drawable/ic_switch_camera"
-            android:contentDescription="切换摄像头按钮" />
-
-    </LinearLayout>
 
 </LinearLayout>

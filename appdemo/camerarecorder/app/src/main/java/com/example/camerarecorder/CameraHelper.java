@@ -86,9 +86,6 @@ public class CameraHelper {
 
     // 传感器方向
     private int sensorOrientation;
-    
-    // 镜头朝向
-    private Integer lensFacing;
 
     // 录制监听器接口
     public interface RecordingListener {
@@ -175,10 +172,9 @@ private Size chooseOptimalSize() {
             textureHeight = 1080;
         }
 
-        // 获取摄像头传感器方向和镜头朝向
+        // 获取摄像头传感器方向
         sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
-        lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING);
-        Log.d(TAG, "Sensor orientation: " + sensorOrientation + ", Lens facing: " + lensFacing);
+        Log.d(TAG, "Sensor orientation: " + sensorOrientation);
 
         // 根据屏幕比例选择最合适的预览尺寸
         Size optimalSize = chooseOptimalSize(outputSizes, textureWidth, textureHeight);
@@ -258,40 +254,45 @@ private void configureTransform(int viewWidth, int viewHeight) {
 
     Matrix matrix = new Matrix();
     RectF viewRect = new RectF(0, 0, viewWidth, viewHeight);
-    RectF bufferRect = new RectF(0, 0, previewSize.getHeight(), previewSize.getWidth());
+    RectF bufferRect = new RectF(0, 0, previewSize.getWidth(), previewSize.getHeight());
 
     float centerX = viewRect.centerX();
     float centerY = viewRect.centerY();
 
     // 获取设备当前旋转角度
     int rotation = getWindowManagerRotation(textureView.getContext());
-
-    // 计算需要旋转的角度
-    int rotate = (sensorOrientation - rotation * 90 + 360) % 360;
     
-    // 对于前置摄像头，额外旋转180度
-    if (lensFacing != null && lensFacing == CameraCharacteristics.LENS_FACING_FRONT) {
+    // 计算需要旋转的角度
+    int rotate = (sensorOrientation + rotation * 90) % 360;
+    
+    // 检查是否为前置摄像头，如果是则添加180度旋转
+    boolean isFrontCamera = false;
+    try {
+        CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+        Integer facing = characteristics.get(CameraCharacteristics.LENS_FACING);
+        isFrontCamera = (facing != null && facing == CameraCharacteristics.LENS_FACING_FRONT);
+    } catch (CameraAccessException e) {
+        Log.e(TAG, "Error getting camera characteristics", e);
+    }
+    
+    // 如果是前置摄像头，添加180度旋转
+    if (isFrontCamera) {
         rotate = (rotate + 180) % 360;
     }
+    
+    // 应用旋转
+    matrix.postRotate(rotate, centerX, centerY);
 
-    // 根据旋转角度调整 bufferRect
+    // 根据旋转角度调整 bufferRect 和缩放
     if (rotate == 90 || rotate == 270) {
+        // 当旋转90度或270度时，需要交换bufferRect的宽高
+        bufferRect = new RectF(0, 0, previewSize.getHeight(), previewSize.getWidth());
         bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
         matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL);
-
-        // 计算缩放比例
-        float scale = Math.max(
-                (float) viewHeight / (float) previewSize.getHeight(),
-                (float) viewWidth / (float) previewSize.getWidth());
-        matrix.postScale(scale, scale, centerX, centerY);
-    } else if (rotate == 180) {
-        // 特别处理180度旋转
-        matrix.postRotate(180, centerX, centerY);
-    }
-
-    // 应用旋转
-    if (rotate != 0 && rotate != 180) {
-        matrix.postRotate(rotate, centerX, centerY);
+    } else if (rotate == 0 || rotate == 180) {
+        // 当旋转0度或180度时，直接应用变换
+        bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
+        matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL);
     }
 
     textureView.setTransform(matrix);
@@ -701,22 +702,31 @@ private void configureTransform(int viewWidth, int viewHeight) {
         // 使用较低的参数确保兼容性
         mediaRecorder.setVideoEncodingBitRate(2000000); // 2 Mbps
         mediaRecorder.setVideoFrameRate(24); // 24 fps
-        mediaRecorder.setVideoSize(1280, 720); // 720p 标准分辨率
+        // 使用与预览相同的尺寸，确保预览和录制比例一致
+        if (previewSize != null) {
+            mediaRecorder.setVideoSize(previewSize.getWidth(), previewSize.getHeight());
+        } else {
+            mediaRecorder.setVideoSize(1280, 720); // 720p 标准分辨率
+        }
 
         // 设置输出文件
         outputVideoFile = createVideoFile();
         // 设置输出文件路径
         mediaRecorder.setOutputFile(outputVideoFile.getAbsolutePath());
 
-        // 计算视频方向
+        // 获取设备当前方向
         int rotation = getWindowManagerRotation(context);
-        int orientationHint = (sensorOrientation - rotation * 90 + 360) % 360;
-        
-        // 对于前置摄像头，额外旋转180度
-        if (lensFacing != null && lensFacing == CameraCharacteristics.LENS_FACING_FRONT) {
-            orientationHint = (orientationHint + 180) % 360;
+        int degrees = rotation * 90;
+
+        // 计算正确的方向提示，改为左旋转90度（减去90度）
+        int orientationHint = (sensorOrientation + degrees - 90) % 360;
+        // 处理负数情况
+        if (orientationHint < 0) {
+            orientationHint += 360;
         }
-        
+        // 确保是正确的角度（0, 90, 180, 270）
+        orientationHint = (orientationHint + 360) % 360;
+
         mediaRecorder.setOrientationHint(orientationHint);
 
         try {

@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.View;
 import android.os.Handler;
 import android.view.TextureView;
 import android.widget.ImageButton;
@@ -57,7 +58,7 @@ public class MainActivity extends AppCompatActivity {
         tvStatus = findViewById(R.id.tvStatus);
 
         // 设置录制按钮初始状态为未激活（灰色）
-        btnRecord.setImageResource(R.drawable.ic_record_inactive);
+        btnRecord.setImageResource(R.drawable.ic_record_inactive_large);
 
         // 录制按钮点击事件处理
         btnRecord.setOnClickListener(v -> toggleRecording());
@@ -199,7 +200,7 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     tvStatus.setText("识别中");
                     // 设置录制按钮为激活状态（红色）
-                    btnRecord.setImageResource(R.drawable.ic_record_active);
+                    btnRecord.setImageResource(R.drawable.ic_record_active_large);
                     btnSwitch.setEnabled(false);
                     isRecording = true;
                 });
@@ -210,7 +211,7 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     tvStatus.setText("未识别");
                     // 设置录制按钮为未激活状态（灰色）
-                    btnRecord.setImageResource(R.drawable.ic_record_inactive);
+                    btnRecord.setImageResource(R.drawable.ic_record_inactive_large);
                     btnSwitch.setEnabled(true);
                     isRecording = false;
                     Toast.makeText(MainActivity.this, "视频已保存", Toast.LENGTH_SHORT).show();
@@ -222,7 +223,7 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     tvStatus.setText("错误: " + error);
                     // 设置录制按钮为未激活状态（灰色）
-                    btnRecord.setImageResource(R.drawable.ic_record_inactive);
+                    btnRecord.setImageResource(R.drawable.ic_record_inactive_large);
                     btnSwitch.setEnabled(true);
                     isRecording = false;
 
@@ -240,7 +241,7 @@ public class MainActivity extends AppCompatActivity {
         btnRecord.setEnabled(true);
         btnSwitch.setEnabled(true);
         // 设置录制按钮初始状态为未激活（灰色）
-        btnRecord.setImageResource(R.drawable.ic_record_inactive);
+        btnRecord.setImageResource(R.drawable.ic_record_inactive_large);
         tvStatus.setText("未识别");
     }
 
@@ -265,10 +266,36 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // 启用沉浸式模式，隐藏状态栏和导航栏
+    private void enableImmersiveMode() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            );
+        }
+    }
+
+    // 禁用沉浸式模式，显示状态栏和导航栏
+    private void disableImmersiveMode() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            );
+        }
+    }
+
     // Activity恢复可见时调用，启动后台线程并打开相机
     @Override
     protected void onResume() {
         super.onResume();
+        // 启用沉浸式模式以隐藏导航栏
+        enableImmersiveMode();
+        
         if (cameraHelper != null) {
             cameraHelper.startBackgroundThread();
             if (textureView.isAvailable()) {
