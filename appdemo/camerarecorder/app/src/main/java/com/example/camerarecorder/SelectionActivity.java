@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
+import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 
 public class SelectionActivity extends AppCompatActivity {
@@ -40,12 +41,12 @@ public class SelectionActivity extends AppCompatActivity {
             public void onClick(View v) {
                 // 添加点击时的视觉反馈
                 v.setPressed(true);
-                // 延迟一小段时间再执行操作
+                // 延迟一小段时间再显示提示信息
                 v.postDelayed(new Runnable() {
                     @Override
                     public void run() {
-                        // 这里可以添加第二个选项的功能
-                        // 示例：跳转到其他Activity或执行其他操作
+                        // 显示"开发中"提示
+                        Toast.makeText(SelectionActivity.this, "开发中", Toast.LENGTH_SHORT).show();
                         v.setPressed(false);
                     }
                 }, 100);

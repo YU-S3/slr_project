@@ -28,8 +28,8 @@ public class MainActivity extends AppCompatActivity {
     // UI组件：纹理视图用于显示相机预览
     private TextureView textureView;
 
-    // UI组件：录制按钮和切换摄像头按钮
-    private ImageButton btnRecord, btnSwitch;
+    // UI组件：录制按钮、切换摄像头按钮和麦克风按钮
+    private ImageButton btnRecord, btnSwitch, btnMicrophone;
 
     // UI组件：状态文本显示当前操作状态
     private TextView tvStatus;
@@ -39,6 +39,9 @@ public class MainActivity extends AppCompatActivity {
 
     // 记录当前是否正在录制的状态标志
     private boolean isRecording = false;
+    
+    // 记录麦克风状态的标志
+    private boolean isMicrophoneOn = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,6 +58,7 @@ public class MainActivity extends AppCompatActivity {
         textureView = findViewById(R.id.textureView);
         btnRecord = findViewById(R.id.btnRecord);
         btnSwitch = findViewById(R.id.btnSwitch);
+        btnMicrophone = findViewById(R.id.btnMicrophone);
         tvStatus = findViewById(R.id.tvStatus);
 
         // 设置录制按钮初始状态为未激活（灰色）
@@ -65,10 +69,14 @@ public class MainActivity extends AppCompatActivity {
 
         // 切换摄像头按钮点击事件处理
         btnSwitch.setOnClickListener(v -> switchCamera());
+        
+        // 麦克风按钮点击事件处理
+        btnMicrophone.setOnClickListener(v -> toggleMicrophone());
 
         // 初始状态下禁用按钮，直到获取到所需权限后再启用
         btnRecord.setEnabled(false);
         btnSwitch.setEnabled(false);
+        btnMicrophone.setEnabled(false);
     }
 
     // 检查所需的运行时权限
@@ -166,6 +174,7 @@ public class MainActivity extends AppCompatActivity {
         tvStatus.setText("权限被拒绝，无法使用摄像头");
         btnRecord.setEnabled(false);
         btnSwitch.setEnabled(false);
+        btnMicrophone.setEnabled(false);
 
         // 显示引导用户前往设置开启权限的对话框
         showPermissionGuide();
@@ -202,6 +211,7 @@ public class MainActivity extends AppCompatActivity {
                     // 设置录制按钮为激活状态（红色）
                     btnRecord.setImageResource(R.drawable.ic_record_active_large);
                     btnSwitch.setEnabled(false);
+                    btnMicrophone.setEnabled(false);
                     isRecording = true;
                 });
             }
@@ -213,6 +223,7 @@ public class MainActivity extends AppCompatActivity {
                     // 设置录制按钮为未激活状态（灰色）
                     btnRecord.setImageResource(R.drawable.ic_record_inactive_large);
                     btnSwitch.setEnabled(true);
+                    btnMicrophone.setEnabled(true);
                     isRecording = false;
                     Toast.makeText(MainActivity.this, "视频已保存", Toast.LENGTH_SHORT).show();
                 });
@@ -225,6 +236,7 @@ public class MainActivity extends AppCompatActivity {
                     // 设置录制按钮为未激活状态（灰色）
                     btnRecord.setImageResource(R.drawable.ic_record_inactive_large);
                     btnSwitch.setEnabled(true);
+                    btnMicrophone.setEnabled(true);
                     isRecording = false;
 
                     // 显示详细的错误对话框
@@ -240,6 +252,7 @@ public class MainActivity extends AppCompatActivity {
         // 启用控制按钮并更新状态信息
         btnRecord.setEnabled(true);
         btnSwitch.setEnabled(true);
+        btnMicrophone.setEnabled(true);
         // 设置录制按钮初始状态为未激活（灰色）
         btnRecord.setImageResource(R.drawable.ic_record_inactive_large);
         tvStatus.setText("未识别");
@@ -263,6 +276,20 @@ public class MainActivity extends AppCompatActivity {
     private void switchCamera() {
         if (cameraHelper != null) {
             cameraHelper.switchCamera();
+        }
+    }
+    
+    // 切换麦克风状态
+    private void toggleMicrophone() {
+        isMicrophoneOn = !isMicrophoneOn;
+        if (isMicrophoneOn) {
+            // 麦克风开启状态 - 蓝色图标
+            btnMicrophone.setColorFilter(ContextCompat.getColor(this, android.R.color.holo_blue_light));
+            Toast.makeText(this, "语音输出：开", Toast.LENGTH_SHORT).show();
+        } else {
+            // 麦克风关闭状态 - 灰色图标
+            btnMicrophone.setColorFilter(ContextCompat.getColor(this, android.R.color.darker_gray));
+            Toast.makeText(this, "语音输出：关", Toast.LENGTH_SHORT).show();
         }
     }
 
