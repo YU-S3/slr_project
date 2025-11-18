@@ -10,7 +10,8 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:background="@color/black">
+        android:background="@color/black"
+        android:fitsSystemWindows="false">
 
         <TextureView
             android:id="@+id/textureView"
@@ -18,14 +19,14 @@
             android:layout_height="match_parent"
             android:layout_gravity="center" />
 
-        <!-- 状态显示 -->
+        <!-- 状态显示 - 移动到安全区域避免被摄像头遮挡 -->
         <TextView
             android:id="@+id/tvStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="未识别"
             android:layout_gravity="center_horizontal|top"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="56dp"
             android:padding="8dp"
             android:background="#33808080"
             android:textSize="16sp"
