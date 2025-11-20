@@ -580,10 +580,15 @@ private void configureTransform(int viewWidth, int viewHeight) {
                 return false;
             }
 
-            int width = Math.max(textureView.getWidth(), 640);
-            int height = Math.max(textureView.getHeight(), 480);
-            // 设置默认缓冲区大小
-            texture.setDefaultBufferSize(width, height);
+            // 使用预览尺寸而不是重新计算尺寸，确保预览和录制使用相同尺寸
+            if (previewSize != null) {
+                texture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
+            } else {
+                int width = Math.max(textureView.getWidth(), 640);
+                int height = Math.max(textureView.getHeight(), 480);
+                // 设置默认缓冲区大小
+                texture.setDefaultBufferSize(width, height);
+            }
 
             // 创建预览Surface和录制Surface
             Surface previewSurface = new Surface(texture);
@@ -641,19 +646,19 @@ private void configureTransform(int viewWidth, int viewHeight) {
                         }
                     }, backgroundHandler);
 
-            return true;
+        return true;
 
-        } catch (Exception e) {
-            Log.e(TAG, "Error starting recording", e);
-            isRecording = false;
-            if (recordingListener != null) {
-                recordingListener.onError("录制启动异常: " + e.getMessage());
-            }
-            // 恢复到预览模式
-            createCameraPreview();
-            return false;
+    } catch (Exception e) {
+        Log.e(TAG, "Error starting recording", e);
+        isRecording = false;
+        if (recordingListener != null) {
+            recordingListener.onError("录制启动异常: " + e.getMessage());
         }
+        // 恢复到预览模式
+        createCameraPreview();
+        return false;
     }
+}
 
     // 检查存储权限
     private boolean checkStoragePermission() {
