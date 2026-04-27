@@ -1,0 +1,271 @@
+{% extends 'base.html' %}
+
+{% block extra_head %}
+<style>
+    /* 左侧：对话记录显示区 */
+    .chat-panel {
+        flex: 1;
+        background: var(--panel-bg);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .chat-header {
+        padding: 20px;
+        border-bottom: 1px solid var(--border);
+        font-weight: bold;
+        font-size: 18px;
+    }
+
+    .chat-history {
+        flex: 1;
+        padding: 20px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .message {
+        max-width: 75%;
+        padding: 12px 16px;
+        border-radius: 12px;
+        line-height: 1.5;
+        position: relative;
+    }
+
+    .msg-sys {
+        background-color: var(--bg-color);
+        align-self: flex-start;
+        border-top-left-radius: 2px;
+    }
+
+    .msg-user {
+        background-color: var(--primary);
+        color: white;
+        align-self: flex-end;
+        border-top-right-radius: 2px;
+    }
+
+    /* 右侧：视频/控制区 */
+    .video-panel {
+        width: 400px;
+        background: var(--bg-color);
+        display: flex;
+        flex-direction: column;
+        padding: 20px;
+        gap: 20px;
+    }
+
+    .video-container {
+        width: 100%;
+        aspect-ratio: 4/3;
+        background: #000;
+        border-radius: 12px;
+        overflow: hidden;
+        position: relative;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transform: scaleX(-1); /* 镜像翻转 */
+    }
+
+    .controls {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        background: var(--panel-bg);
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+
+    .status-indicator {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+        color: var(--text-sub);
+    }
+
+    .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background-color: #ccc;
+    }
+
+    .dot.active { background-color: #2ecc71; box-shadow: 0 0 8px #2ecc71; }
+    .dot.recording { background-color: #e74c3c; animation: pulse 1s infinite alternate; }
+
+    @keyframes pulse {
+        from { opacity: 1; box-shadow: 0 0 0 #e74c3c; }
+        to { opacity: 0.6; box-shadow: 0 0 10px #e74c3c; }
+    }
+
+    .btn {
+        padding: 12px;
+        border: none;
+        border-radius: 6px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn-primary {
+        background-color: var(--primary);
+        color: white;
+    }
+
+    .btn-primary:hover {
+        background-color: #3a7bc8;
+    }
+
+    .btn-danger {
+        background-color: #e74c3c;
+        color: white;
+    }
+
+    .btn-danger:hover {
+        background-color: #c0392b;
+    }
+
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 对话记录区 -->
+<div class="chat-panel">
+    <div class="chat-header">对话流与翻译结果</div>
+    <div class="chat-history" id="chatHistory">
+        <!-- 初始占位消息 -->
+        <div class="message msg-sys">系统：手语模型已就绪，请点击右侧开启摄像头。</div>
+    </div>
+</div>
+
+<!-- 视频监控区 -->
+<div class="video-panel">
+    <div class="video-container">
+        <video id="videoElement" autoplay playsinline muted></video>
+        <!-- Canvas 用于后台截取视频帧转Base64，不直接显示 -->
+        <canvas id="canvasElement" style="display:none;"></canvas>
+    </div>
+
+    <div class="controls">
+        <div class="status-indicator">
+            <div class="dot" id="camStatusDot"></div>
+            <span id="camStatusText">摄像头未开启</span>
+        </div>
+        <button id="toggleCameraBtn" class="btn btn-primary">开启摄像头</button>
+        <hr style="border:0; border-top:1px solid var(--border);">
+        <button id="startCaptureBtn" class="btn btn-primary" disabled>开始识别翻译</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const video = document.getElementById('videoElement');
+    const canvas = document.getElementById('canvasElement');
+    const ctx = canvas.getContext('2d');
+    
+    const toggleCameraBtn = document.getElementById('toggleCameraBtn');
+    const startCaptureBtn = document.getElementById('startCaptureBtn');
+    
+    const camStatusDot = document.getElementById('camStatusDot');
+    const camStatusText = document.getElementById('camStatusText');
+    const chatHistory = document.getElementById('chatHistory');
+
+    let stream = null;
+    let isRecognizing = false;
+    let captureInterval = null;
+
+    // 添加消息到面板
+    function addMessage(text, type='sys') {
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `message msg-${type}`;
+        msgDiv.innerText = text;
+        chatHistory.appendChild(msgDiv);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+    }
+
+    // 开关摄像头
+    toggleCameraBtn.addEventListener('click', async () => {
+        if (!stream) {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+                video.srcObject = stream;
+                
+                camStatusDot.classList.add('active');
+                camStatusText.innerText = "摄像头已开启";
+                toggleCameraBtn.innerText = "关闭摄像头";
+                toggleCameraBtn.classList.replace('btn-primary', 'btn-danger');
+                startCaptureBtn.disabled = false;
+
+            } catch (err) {
+                alert("无法访问摄像头: " + err.message);
+            }
+        } else {
+            // 关闭摄像头
+            stream.getTracks().forEach(track => track.stop());
+            video.srcObject = null;
+            stream = null;
+
+            camStatusDot.classList.remove('active');
+            camStatusDot.classList.remove('recording');
+            camStatusText.innerText = "摄像头已关闭";
+            toggleCameraBtn.innerText = "开启摄像头";
+            toggleCameraBtn.classList.replace('btn-danger', 'btn-primary');
+            
+            // 如果正在识别，强制停止
+            if (isRecognizing) startCaptureBtn.click();
+            startCaptureBtn.disabled = true;
+        }
+    });
+
+    // 开启/停止识别（这里先做前端假数据展示）
+    startCaptureBtn.addEventListener('click', () => {
+        if (!isRecognizing) {
+            isRecognizing = true;
+            startCaptureBtn.innerText = "停止识别";
+            startCaptureBtn.classList.replace('btn-primary', 'btn-danger');
+            camStatusDot.classList.add('recording');
+            camStatusText.innerText = "识别翻译中...";
+            
+            addMessage("系统：开始捕捉手语视频流并发送...", 'sys');
+
+            // 模拟：每3秒钟随机给出一个翻译结果
+            captureInterval = setInterval(() => {
+                // 1. 真实场景中，这里应该通过 canvas.drawImage 然后 toDataURL 提取图片并发给 WebSocket
+                // canvas.width = video.videoWidth;
+                // canvas.height = video.videoHeight;
+                // ctx.drawImage(video, 0, 0);
+                // let base64Img = canvas.toDataURL('image/jpeg', 0.8);
+                // ws.send(JSON.stringify({type: "frame", image_b64: base64Img}));
+
+                // 2. 当前阶段我们仅模拟UI更新
+                const dummyTranslations = ["你好", "谢谢", "请问洗手间在哪里", "很高兴认识你", "[不确定: 动作过快]"];
+                const text = dummyTranslations[Math.floor(Math.random() * dummyTranslations.length)];
+                addMessage("AI翻译： " + text, 'sys');
+
+            }, 3000);
+
+        } else {
+            isRecognizing = false;
+            startCaptureBtn.innerText = "开始识别翻译";
+            startCaptureBtn.classList.replace('btn-danger', 'btn-primary');
+            camStatusDot.classList.remove('recording');
+            camStatusText.innerText = "摄像头已开启 (未识别)";
+            
+            clearInterval(captureInterval);
+            addMessage("系统：识别已停止。", 'sys');
+        }
+    });
+</script>
+{% endblock %}
