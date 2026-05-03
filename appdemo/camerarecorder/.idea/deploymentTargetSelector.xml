@@ -2,12 +2,22 @@
 <project version="4">
   <component name="deploymentTargetSelector">
     <selectionStates>
+      <SelectionState runConfigName="SignLanguage">
+        <option name="selectionMode" value="DROPDOWN" />
+      </SelectionState>
       <SelectionState runConfigName="app">
         <option name="selectionMode" value="DROPDOWN" />
-        <DropdownSelection timestamp="2026-05-03T12:11:19.185601100Z">
+<<<<<<< Updated upstream
+        <DropdownSelection timestamp="2025-11-15T08:02:53.595993900Z">
           <Target type="DEFAULT_BOOT">
             <handle>
-              <DeviceId pluginId="PhysicalDevice" identifier="serial=10AE632MNE0011T" />
+              <DeviceId pluginId="LocalEmulator" identifier="path=C:\Users\admin\.android\avd\Medium_Phone_2_2.avd" />
+=======
+        <DropdownSelection timestamp="2025-11-11T16:16:03.868702100Z">
+          <Target type="DEFAULT_BOOT">
+            <handle>
+              <DeviceId pluginId="Default" identifier="serial=emulator-5554;connection=214d4ac4" />
+>>>>>>> Stashed changes
             </handle>
           </Target>
         </DropdownSelection>
