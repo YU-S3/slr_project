@@ -19,7 +19,7 @@
             android:layout_height="match_parent"
             android:layout_gravity="center" />
 
-        <!-- 状态显示 - 移动到安全区域避免被摄像头遮挡 -->
+        <!-- 状态显示 - 当前连接/识别状态 -->
         <TextView
             android:id="@+id/tvStatus"
             android:layout_width="wrap_content"
@@ -31,6 +31,44 @@
             android:background="#33808080"
             android:textSize="16sp"
             android:textColor="@android:color/white" />
+
+        <!-- 翻译结果展示 - 覆盖在相机预览中央 -->
+        <TextView
+            android:id="@+id/tvTranslation"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text=""
+            android:textSize="32sp"
+            android:textColor="@android:color/white"
+            android:textStyle="bold"
+            android:shadowColor="#FF000000"
+            android:shadowRadius="6"
+            android:shadowDx="2"
+            android:shadowDy="2"
+            android:background="#88000000"
+            android:padding="20dp"
+            android:visibility="gone"
+            android:maxLines="3"
+            android:ellipsize="end"
+            android:gravity="center" />
+
+        <!-- 调试浮层 - 显示在相机预览左上角，默认隐藏，长按状态栏切换 -->
+        <TextView
+            android:id="@+id/tvDebugOverlay"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|start"
+            android:layout_marginTop="100dp"
+            android:layout_marginStart="8dp"
+            android:padding="8dp"
+            android:background="#CC000000"
+            android:textColor="#00FF00"
+            android:textSize="11sp"
+            android:typeface="monospace"
+            android:lineSpacingExtra="2dp"
+            android:visibility="gone"
+            android:text="调试面板加载中..." />
 
         <!-- 控制按钮区域 -->
         <androidx.constraintlayout.widget.ConstraintLayout

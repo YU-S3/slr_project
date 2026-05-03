@@ -50,6 +50,7 @@ android {
         // 目标编译版本设置为Java 11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
 }
 
 // 依赖项配置块
@@ -65,12 +66,14 @@ dependencies {
     implementation(libs.appcompat)
     // 通过libs.versions.toml文件引用的Material Design组件库
     implementation(libs.material)
+    
+    // OkHttp WebSocket 客户端（用于实时帧传输）
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    
     // JUnit测试框架依赖
     testImplementation(libs.junit)
     // Android扩展JUnit测试库
     androidTestImplementation(libs.ext.junit)
     // Espresso UI测试框架
     androidTestImplementation(libs.espresso.core)
-    // Google Material Design组件库（已注释）
-    //implementation("com.google.android.material:material:1.9.0")
 }

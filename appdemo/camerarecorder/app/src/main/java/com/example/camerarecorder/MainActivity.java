@@ -3,229 +3,237 @@ package com.example.camerarecorder;
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import android.os.Build;
 import android.os.Bundle;
-import android.view.View;
 import android.os.Handler;
+import android.os.Looper;
+import android.util.Log;
+import android.util.Size;
+import android.view.View;
 import android.view.TextureView;
 import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
+
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
-
-
-// 主Activity类，负责管理摄像头录像功能的界面和交互逻辑
+/**
+ * 主 Activity — 手语识别实时翻译界面
+ * <p>
+ * 改造说明：从"视频录制"改为"实时抽帧 + WebSocket 传输 + 翻译结果展示"
+ * <p>
+ * 工作流程：
+ * 1. 用户点击"开始识别" → 建立 WebSocket 连接 → 开启定时抽帧
+ * 2. 每 100ms 从 TextureView 捕获一帧 → 运动检测 → JPEG 压缩 → Base64 → 发送
+ * 3. 收到后端返回的翻译结果 → 更新 UI 展示
+ * 4. 用户点击"停止识别" → 停止抽帧 → 断开 WebSocket
+ */
 public class MainActivity extends AppCompatActivity {
 
-    // 定义请求摄像头权限的请求码
     private static final int REQUEST_CAMERA_PERMISSION = 100;
 
-    // UI组件：纹理视图用于显示相机预览
+    // UI 组件
     private TextureView textureView;
-
-    // UI组件：录制按钮、切换摄像头按钮和麦克风按钮
     private ImageButton btnRecord, btnSwitch, btnMicrophone;
+    private TextView tvStatus, tvTranslation;
 
-    // UI组件：状态文本显示当前操作状态
-    private TextView tvStatus;
-
-    // 相机助手类实例，封装了具体的相机操作逻辑
+    // 核心模块
     private CameraHelper cameraHelper;
+    private WebSocketClient webSocketClient;
+    private FrameCaptureHelper frameCaptureHelper;
+    private MotionDetector motionDetector;
 
-    // 记录当前是否正在录制的状态标志
+    // 状态标志
     private boolean isRecording = false;
-    
-    // 记录麦克风状态的标志
     private boolean isMicrophoneOn = false;
+    private boolean isConnected = false;
+    private int frameIdx = 0;
+
+    // 定时抽帧
+    private Handler frameHandler;
+    private Runnable frameCaptureRunnable;
+
+    // 调试浮层
+    private DebugOverlayHelper debugOverlay;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main); // 设置布局文件
+        setContentView(R.layout.activity_main);
+        setTitle("手语实时翻译");
+        initViews();
+        checkPermissions();
 
-        setTitle("摄像头录像器"); // 设置标题栏文字
-        initViews(); // 初始化界面控件
-        checkPermissions(); // 检查并申请必要权限
+        // 初始化工具类
+        frameCaptureHelper = new FrameCaptureHelper();
+        motionDetector = new MotionDetector();
+        frameHandler = new Handler(Looper.getMainLooper());
     }
 
-    // 初始化界面上的所有控件，并设置点击事件监听器
     private void initViews() {
         textureView = findViewById(R.id.textureView);
         btnRecord = findViewById(R.id.btnRecord);
         btnSwitch = findViewById(R.id.btnSwitch);
         btnMicrophone = findViewById(R.id.btnMicrophone);
         tvStatus = findViewById(R.id.tvStatus);
+        tvTranslation = findViewById(R.id.tvTranslation);
 
-        // 设置录制按钮初始状态为未激活（灰色）
+        // 初始状态
         btnRecord.setImageResource(R.drawable.ic_record_inactive_large);
+        tvTranslation.setVisibility(View.GONE);
 
-        // 录制按钮点击事件处理
-        btnRecord.setOnClickListener(v -> toggleRecording());
-
-        // 切换摄像头按钮点击事件处理
+        // 按钮点击事件
+        btnRecord.setOnClickListener(v -> toggleRecognition());
         btnSwitch.setOnClickListener(v -> switchCamera());
-        
-        // 麦克风按钮点击事件处理
         btnMicrophone.setOnClickListener(v -> toggleMicrophone());
 
-        // 初始状态下禁用按钮，直到获取到所需权限后再启用
+        // 初始禁用按钮，等待权限
         btnRecord.setEnabled(false);
         btnSwitch.setEnabled(false);
         btnMicrophone.setEnabled(false);
+
+        // ===== 调试浮层初始化 =====
+        TextView tvDebugOverlay = findViewById(R.id.tvDebugOverlay);
+        debugOverlay = new DebugOverlayHelper(tvDebugOverlay);
+
+        // 长按状态文字切换调试面板（仅在 DEBUG_MODE 开启时生效）
+        if (Config.DEBUG_MODE) {
+            tvStatus.setOnLongClickListener(v -> {
+                boolean nowShowing = debugOverlay.isShowing();
+                if (nowShowing) {
+                    debugOverlay.hide();
+                    Toast.makeText(this, "调试面板已隐藏", Toast.LENGTH_SHORT).show();
+                } else {
+                    debugOverlay.show();
+                    debugOverlay.start();
+                    Toast.makeText(this, "调试面板已显示", Toast.LENGTH_SHORT).show();
+                }
+                return true;
+            });
+        }
     }
 
-    // 检查所需的运行时权限
+    // ======================== 权限处理 ========================
+
     private void checkPermissions() {
-        // 基础权限包括摄像头和录音权限
         String[] basePermissions = {
-                Manifest.permission.CAMERA,
-                Manifest.permission.RECORD_AUDIO
+                Manifest.permission.CAMERA
         };
 
-        // 根据不同Android版本处理存储权限需求
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // Android 13及以上版本需要特定媒体访问权限
             requestPermissionsWithMediaAccess();
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10-12使用应用专属存储，无需额外权限
             requestBasePermissions(basePermissions);
         } else {
-            // Android 9及以下需要读取外部存储权限
             String[] legacyPermissions = {
                     Manifest.permission.CAMERA,
-                    Manifest.permission.RECORD_AUDIO,
                     Manifest.permission.READ_EXTERNAL_STORAGE
             };
             requestBasePermissions(legacyPermissions);
         }
     }
 
-    // 请求与媒体访问相关的权限（适用于Android 13及以上）
     private void requestPermissionsWithMediaAccess() {
         String[] permissions;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            // Android 14以上需要READ_MEDIA_VIDEO和READ_MEDIA_IMAGES权限
-            permissions = new String[]{
+            permissions = new String[] {
                     Manifest.permission.CAMERA,
-                    Manifest.permission.RECORD_AUDIO,
                     Manifest.permission.READ_MEDIA_VIDEO,
                     Manifest.permission.READ_MEDIA_IMAGES
             };
         } else {
-            // Android 13只需要READ_MEDIA_VIDEO权限
-            permissions = new String[]{
+            permissions = new String[] {
                     Manifest.permission.CAMERA,
-                    Manifest.permission.RECORD_AUDIO,
                     Manifest.permission.READ_MEDIA_VIDEO
             };
         }
         requestBasePermissions(permissions);
     }
 
-    // 请求基础权限的方法
     private void requestBasePermissions(String[] permissions) {
         boolean allGranted = true;
-        // 检查每个权限是否已被授予
         for (String permission : permissions) {
             if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
                 allGranted = false;
                 break;
             }
         }
-
         if (allGranted) {
-            initCamera(); // 如果所有权限都已获得，则初始化相机
+            initCamera();
         } else {
-            // 否则请求缺失的权限
             ActivityCompat.requestPermissions(this, permissions, REQUEST_CAMERA_PERMISSION);
         }
     }
 
-    // 处理权限请求结果回调
     @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+            @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_CAMERA_PERMISSION) {
             boolean allGranted = true;
-            // 检查所有权限是否都被允许
             for (int result : grantResults) {
                 if (result != PackageManager.PERMISSION_GRANTED) {
                     allGranted = false;
                     break;
                 }
             }
-
             if (allGranted) {
-                initCamera(); // 权限全部获得后初始化相机
+                initCamera();
             } else {
-                handlePermissionDenied(); // 处理权限被拒绝的情况
+                handlePermissionDenied();
             }
         }
     }
 
-    // 当权限被拒绝时执行的操作
     private void handlePermissionDenied() {
-        Toast.makeText(this, "需要权限才能使用摄像头和录像功能", Toast.LENGTH_LONG).show();
+        Toast.makeText(this, "需要摄像头权限才能使用手语翻译功能", Toast.LENGTH_LONG).show();
         tvStatus.setText("权限被拒绝，无法使用摄像头");
         btnRecord.setEnabled(false);
         btnSwitch.setEnabled(false);
         btnMicrophone.setEnabled(false);
-
-        // 显示引导用户前往设置开启权限的对话框
         showPermissionGuide();
     }
 
-    // 展示一个提示对话框指导用户如何手动授权
     private void showPermissionGuide() {
         new AlertDialog.Builder(this)
                 .setTitle("需要权限")
-                .setMessage("应用需要摄像头、麦克风和存储权限才能正常录像。请在设置中授予权限。")
+                .setMessage("应用需要摄像头权限才能进行手语识别翻译。请在设置中授予权限。")
                 .setPositiveButton("去设置", (dialog, which) -> openAppSettings())
                 .setNegativeButton("取消", null)
                 .show();
     }
 
-    // 打开本应用程序的系统设置页面
     private void openAppSettings() {
         Intent intent = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
         intent.setData(android.net.Uri.parse("package:" + getPackageName()));
         startActivity(intent);
     }
 
+    // ======================== 相机初始化 ========================
 
-    // 初始化相机相关资源
     private void initCamera() {
         cameraHelper = new CameraHelper(this, textureView);
 
-        // 设置录制状态变化的监听器
-        cameraHelper.setRecordingListener(new CameraHelper.RecordingListener() {
+        cameraHelper.setCameraListener(new CameraHelper.CameraListener() {
             @Override
-            public void onRecordingStarted() {
+            public void onCameraOpened() {
                 runOnUiThread(() -> {
-                    tvStatus.setText("识别中");
-                    // 设置录制按钮为激活状态（红色）
-                    btnRecord.setImageResource(R.drawable.ic_record_active_large);
-                    btnSwitch.setEnabled(false);
-                    btnMicrophone.setEnabled(false);
-                    isRecording = true;
+                    tvStatus.setText("就绪");
+                    btnRecord.setEnabled(true);
+                    btnSwitch.setEnabled(true);
+                    btnMicrophone.setEnabled(true);
                 });
             }
 
             @Override
-            public void onRecordingStopped(String filePath) {
+            public void onCameraClosed() {
                 runOnUiThread(() -> {
-                    tvStatus.setText("未识别");
-                    // 设置录制按钮为未激活状态（灰色）
-                    btnRecord.setImageResource(R.drawable.ic_record_inactive_large);
-                    btnSwitch.setEnabled(true);
-                    btnMicrophone.setEnabled(true);
-                    isRecording = false;
-                    Toast.makeText(MainActivity.this, "视频已保存", Toast.LENGTH_SHORT).show();
+                    tvStatus.setText("已关闭");
                 });
             }
 
@@ -233,96 +241,272 @@ public class MainActivity extends AppCompatActivity {
             public void onError(String error) {
                 runOnUiThread(() -> {
                     tvStatus.setText("错误: " + error);
-                    // 设置录制按钮为未激活状态（灰色）
-                    btnRecord.setImageResource(R.drawable.ic_record_inactive_large);
-                    btnSwitch.setEnabled(true);
-                    btnMicrophone.setEnabled(true);
-                    isRecording = false;
-
-                    // 显示详细的错误对话框
-                    if (error.contains("摄像头") || error.contains("录制")) {
-                        showCameraErrorDialog(error);
-                    } else {
-                        Toast.makeText(MainActivity.this, error, Toast.LENGTH_LONG).show();
-                    }
+                    showCameraErrorDialog(error);
                 });
             }
         });
 
-        // 启用控制按钮并更新状态信息
         btnRecord.setEnabled(true);
         btnSwitch.setEnabled(true);
         btnMicrophone.setEnabled(true);
-        // 设置录制按钮初始状态为未激活（灰色）
         btnRecord.setImageResource(R.drawable.ic_record_inactive_large);
-        tvStatus.setText("未识别");
+        tvStatus.setText("初始中...");
     }
 
-    // 控制录制开始或结束
-    private void toggleRecording() {
-        if (cameraHelper == null) return;
+    // ======================== 核心识别逻辑 ========================
+
+    /**
+     * 切换识别状态（开始/停止）
+     */
+    private void toggleRecognition() {
+        if (cameraHelper == null)
+            return;
 
         if (!isRecording) {
-            if (cameraHelper.startRecording()) {
-                isRecording = true;
-            }
+            startRecognition();
         } else {
-            cameraHelper.stopRecording();
-            isRecording = false;
+            stopRecognition();
         }
     }
 
-    // 切换前后摄像头
+    /**
+     * 开始实时识别：
+     * 1. 连接 WebSocket
+     * 2. 启动定时帧捕获循环
+     */
+    private void startRecognition() {
+        // 重置状态
+        frameIdx = 0;
+        motionDetector.reset();
+        if (debugOverlay != null) {
+            debugOverlay.resetStats();
+            debugOverlay.start();
+        }
+
+        // 初始化 WebSocket 客户端
+        webSocketClient = new WebSocketClient(Config.WS_URL, new WebSocketClient.WebSocketCallback() {
+            @Override
+            public void onConnected() {
+                isConnected = true;
+                if (debugOverlay != null) {
+                    debugOverlay.setConnectionStatus(true);
+                }
+                runOnUiThread(() -> {
+                    tvStatus.setText("已连接");
+                    startFrameCapture();
+                });
+            }
+
+            @Override
+            public void onDisconnected(int code, String reason) {
+                isConnected = false;
+                if (debugOverlay != null) {
+                    debugOverlay.setConnectionStatus(false);
+                }
+                runOnUiThread(() -> {
+                    tvStatus.setText("连接断开");
+                });
+            }
+
+            @Override
+            public void onTranslationReceived(String text, float confidence, int[] frameRange) {
+                runOnUiThread(() -> {
+                    // 更新翻译结果 UI
+                    buttonRecognitionText(text, confidence);
+                });
+            }
+
+            @Override
+            public void onStatusReceived(float gpuUtil, float latencyMs) {
+                // 可选：在调试模式显示服务器状态
+                runOnUiThread(() -> {
+                    if (gpuUtil > 0 && latencyMs > 0) {
+                        tvStatus.setText("识别中 | " + (int) latencyMs + "ms");
+                    }
+                });
+            }
+
+            @Override
+            public void onError(String error) {
+                if (debugOverlay != null) {
+                    debugOverlay.setLastError(error);
+                }
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this, error, Toast.LENGTH_SHORT).show();
+                });
+            }
+        });
+
+        // 建立连接
+        webSocketClient.connect();
+
+        // 更新 UI
+        isRecording = true;
+        btnRecord.setImageResource(R.drawable.ic_record_active_large);
+        btnSwitch.setEnabled(false);
+        btnMicrophone.setEnabled(false);
+        tvStatus.setText("连接中...");
+    }
+
+    /**
+     * 停止实时识别
+     */
+    private void stopRecognition() {
+        // 停止帧捕获
+        stopFrameCapture();
+
+        // 停止调试覆盖层
+        if (debugOverlay != null) {
+            debugOverlay.stop();
+        }
+
+        // 断开 WebSocket
+        if (webSocketClient != null) {
+            webSocketClient.disconnect();
+            webSocketClient = null;
+        }
+
+        // 隐藏翻译结果
+        tvTranslation.setVisibility(View.GONE);
+        tvTranslation.setText("");
+
+        // 更新 UI
+        isRecording = false;
+        isConnected = false;
+        btnRecord.setImageResource(R.drawable.ic_record_inactive_large);
+        btnSwitch.setEnabled(true);
+        btnMicrophone.setEnabled(true);
+        tvStatus.setText("就绪");
+    }
+
+    /**
+     * 启动定时帧捕获循环（10 FPS）
+     */
+    private void startFrameCapture() {
+        frameCaptureRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (!isRecording || !isConnected) {
+                    return;
+                }
+
+                // 1. 从 TextureView 获取帧，并还原摄像头原始比例（去拉伸）
+                Size previewSize = cameraHelper.getPreviewSize();
+                int sensorOrientation = cameraHelper.getSensorOrientation();
+                int displayRotation = cameraHelper.getDisplayRotation();
+                Bitmap frameBmp = frameCaptureHelper.captureFrame(
+                        textureView,
+                        previewSize.getWidth(), previewSize.getHeight(),
+                        sensorOrientation, displayRotation);
+                if (frameBmp == null) {
+                    // 帧获取失败，跳过本次
+                    frameHandler.postDelayed(this, Config.CAPTURE_INTERVAL_MS);
+                    return;
+                }
+                if (debugOverlay != null) {
+                    debugOverlay.onFrameCaptured();
+                }
+
+                // 2. 运动检测 - 只在有运动时发送
+                boolean hasMotion = motionDetector.detectMotion(frameBmp);
+                if (!hasMotion) {
+                    // 静止帧，丢弃不上传
+                    if (debugOverlay != null) {
+                        debugOverlay.onFrameSkipped();
+                    }
+                    frameHandler.postDelayed(this, Config.CAPTURE_INTERVAL_MS);
+                    return;
+                }
+
+                // 3. 压缩为 JPEG + Base64 编码
+                String base64Image = frameCaptureHelper.compressToBase64(frameBmp, Config.JPEG_QUALITY);
+                if (base64Image == null) {
+                    // 编码失败，跳过
+                    frameHandler.postDelayed(this, Config.CAPTURE_INTERVAL_MS);
+                    return;
+                }
+
+                // 4. 通过 WebSocket 发送
+                webSocketClient.sendFrame(frameIdx++, base64Image, System.currentTimeMillis());
+                if (debugOverlay != null) {
+                    debugOverlay.onFrameSent(base64Image.length() / 1024);
+                }
+
+                // 继续下一帧
+                frameHandler.postDelayed(this, Config.CAPTURE_INTERVAL_MS);
+            }
+        };
+
+        // 启动循环
+        frameHandler.postDelayed(frameCaptureRunnable, Config.CAPTURE_INTERVAL_MS);
+        Log.d("MainActivity", "Frame capture started at " + Config.CAPTURE_INTERVAL_MS + "ms interval");
+    }
+
+    /**
+     * 停止帧捕获循环
+     */
+    private void stopFrameCapture() {
+        if (frameCaptureRunnable != null) {
+            frameHandler.removeCallbacks(frameCaptureRunnable);
+            frameCaptureRunnable = null;
+        }
+        Log.d("MainActivity", "Frame capture stopped");
+    }
+
+    /**
+     * 更新翻译结果到 UI
+     */
+    private void buttonRecognitionText(String text, float confidence) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+
+        // 置信度过低时显示特殊提示
+        String displayText;
+        if (confidence < 0.6f || "[不确定]".equals(text)) {
+            displayText = "🤔 不确定";
+        } else {
+            displayText = text;
+        }
+
+        tvTranslation.setText(displayText);
+        tvTranslation.setVisibility(View.VISIBLE);
+
+        // 状态栏同时显示置信度
+        if (confidence > 0) {
+            tvStatus.setText("识别中 | " + String.format("%.0f%%", confidence * 100));
+        } else {
+            tvStatus.setText("识别中");
+        }
+    }
+
+    // ======================== 其他控件 ========================
+
     private void switchCamera() {
         if (cameraHelper != null) {
             cameraHelper.switchCamera();
+            // 切换摄像头后重置运动检测器
+            motionDetector.reset();
         }
     }
-    
-    // 切换麦克风状态
+
     private void toggleMicrophone() {
         isMicrophoneOn = !isMicrophoneOn;
         if (isMicrophoneOn) {
-            // 麦克风开启状态 - 蓝色图标
             btnMicrophone.setColorFilter(ContextCompat.getColor(this, android.R.color.holo_blue_light));
             Toast.makeText(this, "语音输出：开", Toast.LENGTH_SHORT).show();
         } else {
-            // 麦克风关闭状态 - 灰色图标
             btnMicrophone.setColorFilter(ContextCompat.getColor(this, android.R.color.darker_gray));
             Toast.makeText(this, "语音输出：关", Toast.LENGTH_SHORT).show();
         }
     }
 
-    // 启用沉浸式模式，隐藏状态栏和导航栏
-    private void enableImmersiveMode() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            getWindow().getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_FULLSCREEN
-                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            );
-        }
-    }
+    // ======================== 生命周期管理 ========================
 
-    // 禁用沉浸式模式，显示状态栏和导航栏
-    private void disableImmersiveMode() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            getWindow().getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            );
-        }
-    }
-
-    // Activity恢复可见时调用，启动后台线程并打开相机
     @Override
     protected void onResume() {
         super.onResume();
-        // 启用沉浸式模式以隐藏导航栏
         enableImmersiveMode();
-        
         if (cameraHelper != null) {
             cameraHelper.startBackgroundThread();
             if (textureView.isAvailable()) {
@@ -333,50 +517,44 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // Activity暂停时调用，关闭相机和释放资源
     @Override
     protected void onPause() {
         super.onPause();
+        if (isRecording) {
+            stopRecognition();
+        }
         if (cameraHelper != null) {
-            if (isRecording) {
-                cameraHelper.stopRecording();
-                isRecording = false;
-            }
             cameraHelper.closeCamera();
             cameraHelper.stopBackgroundThread();
         }
     }
 
-    // Activity销毁时调用，彻底清理资源
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (isRecording) {
+            stopRecognition();
+        }
         if (cameraHelper != null) {
             cameraHelper.closeCamera();
             cameraHelper.stopBackgroundThread();
         }
     }
 
-    // 提供重试机制，在摄像头出错时让用户尝试重新连接
-    private void retryCameraOpen() {
-        new AlertDialog.Builder(this)
-                .setTitle("摄像头错误")
-                .setMessage("摄像头出现错误，是否重试？")
-                .setPositiveButton("重试", (dialog, which) -> {
-                    if (cameraHelper != null) {
-                        // 先完全关闭再重新打开
-                        cameraHelper.closeCamera();
-                        // 延迟一段时间再重试
-                        new Handler().postDelayed(() -> {
-                            cameraHelper.openCamera();
-                        }, 1000);
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .show();
+    // ======================== UI 辅助方法 ========================
+
+    private void enableImmersiveMode() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        }
     }
 
-    // 显示关于摄像头错误的具体信息及解决建议
     private void showCameraErrorDialog(String error) {
         runOnUiThread(() -> {
             new AlertDialog.Builder(this)
@@ -386,5 +564,21 @@ public class MainActivity extends AppCompatActivity {
                     .setNegativeButton("确定", null)
                     .show();
         });
+    }
+
+    private void retryCameraOpen() {
+        new AlertDialog.Builder(this)
+                .setTitle("摄像头错误")
+                .setMessage("摄像头出现错误，是否重试？")
+                .setPositiveButton("重试", (dialog, which) -> {
+                    if (cameraHelper != null) {
+                        cameraHelper.closeCamera();
+                        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                            cameraHelper.openCamera();
+                        }, 1000);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 }
