@@ -27,29 +27,31 @@
             android:text="未识别"
             android:layout_gravity="center_horizontal|top"
             android:layout_marginTop="56dp"
-            android:padding="8dp"
+            android:padding="6dp"
             android:background="#33808080"
-            android:textSize="16sp"
+            android:textSize="14sp"
             android:textColor="@android:color/white" />
 
-        <!-- 翻译结果展示 - 覆盖在相机预览中央 -->
+        <!-- 翻译结果展示 - 缩小版，置于相机预览下方区域 -->
         <TextView
             android:id="@+id/tvTranslation"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="center"
+            android:layout_gravity="center_horizontal|bottom"
+            android:layout_marginBottom="100dp"
             android:text=""
-            android:textSize="32sp"
+            android:textSize="20sp"
             android:textColor="@android:color/white"
             android:textStyle="bold"
             android:shadowColor="#FF000000"
             android:shadowRadius="6"
             android:shadowDx="2"
             android:shadowDy="2"
-            android:background="#88000000"
-            android:padding="20dp"
+            android:background="#AA000000"
+            android:padding="10dp"
+            android:maxWidth="280dp"
             android:visibility="gone"
-            android:maxLines="3"
+            android:maxLines="2"
             android:ellipsize="end"
             android:gravity="center" />
 
@@ -89,7 +91,7 @@
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintBottom_toTopOf="@+id/bottom_guideline"
-                app:layout_constraintHorizontal_bias="0.2" />
+                app:layout_constraintHorizontal_bias="0.15" />
 
             <!-- 录制按钮 - 缩小至0.5倍 -->
             <ImageButton
@@ -116,8 +118,23 @@
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintBottom_toTopOf="@+id/bottom_guideline"
-                app:layout_constraintHorizontal_bias="0.8" />
-                
+                app:layout_constraintHorizontal_bias="0.85" />
+
+            <!-- 历史记录按钮 - 位于右面 -->
+            <ImageButton
+                android:id="@+id/btnHistory"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:padding="10dp"
+                android:background="@drawable/circular_button_background_transparent"
+                android:src="@drawable/ic_history"
+                android:contentDescription="翻译记录"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintBottom_toTopOf="@+id/btnRecord"
+                app:layout_constraintHorizontal_bias="0.5"
+                android:layout_marginBottom="8dp" />
+
             <androidx.constraintlayout.widget.Guideline
                 android:id="@+id/bottom_guideline"
                 android:layout_width="wrap_content"

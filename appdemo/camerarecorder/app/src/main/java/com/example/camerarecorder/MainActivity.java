@@ -8,6 +8,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.speech.tts.TextToSpeech;
 import android.util.Log;
 import android.util.Size;
 import android.view.View;
@@ -21,6 +22,9 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+
+import java.util.ArrayList;
+import java.util.Locale;
 
 /**
  * 主 Activity — 手语识别实时翻译界面
@@ -39,7 +43,7 @@ public class MainActivity extends AppCompatActivity {
 
     // UI 组件
     private TextureView textureView;
-    private ImageButton btnRecord, btnSwitch, btnMicrophone;
+    private ImageButton btnRecord, btnSwitch, btnMicrophone, btnHistory;
     private TextView tvStatus, tvTranslation;
 
     // 核心模块
@@ -52,20 +56,37 @@ public class MainActivity extends AppCompatActivity {
     private boolean isRecording = false;
     private boolean isMicrophoneOn = false;
     private boolean isConnected = false;
+    private boolean isSendingFrames = false; // 正在发送缓存的帧
     private int frameIdx = 0;
+
+    // API (1).md 协议状态
+    private int frameWindowSize = Config.DEFAULT_FRAME_WINDOW_SIZE;
+    private String processingMode = "";
+
+    // 帧缓冲区（本地缓存整段录制，停止后一次性发送）
+    private ArrayList<String> frameBuffer;
 
     // 定时抽帧
     private Handler frameHandler;
     private Runnable frameCaptureRunnable;
 
+    // TTS 语音合成
+    private TextToSpeech textToSpeech;
+
     // 调试浮层
     private DebugOverlayHelper debugOverlay;
+
+    // 翻译记录
+    private TranslationHistoryManager historyManager;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         setTitle("手语实时翻译");
+
+        // 初始化翻译记录管理器
+        historyManager = new TranslationHistoryManager(this);
         initViews();
         checkPermissions();
 
@@ -73,6 +94,9 @@ public class MainActivity extends AppCompatActivity {
         frameCaptureHelper = new FrameCaptureHelper();
         motionDetector = new MotionDetector();
         frameHandler = new Handler(Looper.getMainLooper());
+
+        // 初始化 TTS（仅在首次需要时真正初始化引擎）
+        initTextToSpeech();
     }
 
     private void initViews() {
@@ -80,6 +104,7 @@ public class MainActivity extends AppCompatActivity {
         btnRecord = findViewById(R.id.btnRecord);
         btnSwitch = findViewById(R.id.btnSwitch);
         btnMicrophone = findViewById(R.id.btnMicrophone);
+        btnHistory = findViewById(R.id.btnHistory);
         tvStatus = findViewById(R.id.tvStatus);
         tvTranslation = findViewById(R.id.tvTranslation);
 
@@ -91,6 +116,11 @@ public class MainActivity extends AppCompatActivity {
         btnRecord.setOnClickListener(v -> toggleRecognition());
         btnSwitch.setOnClickListener(v -> switchCamera());
         btnMicrophone.setOnClickListener(v -> toggleMicrophone());
+        btnHistory.setOnClickListener(v -> {
+            // 打开翻译记录页面
+            Intent intent = new Intent(MainActivity.this, HistoryActivity.class);
+            startActivity(intent);
+        });
 
         // 初始禁用按钮，等待权限
         btnRecord.setEnabled(false);
@@ -277,6 +307,8 @@ public class MainActivity extends AppCompatActivity {
     private void startRecognition() {
         // 重置状态
         frameIdx = 0;
+        isSendingFrames = false;
+        frameBuffer = new ArrayList<>();
         motionDetector.reset();
         if (debugOverlay != null) {
             debugOverlay.resetStats();
@@ -291,9 +323,9 @@ public class MainActivity extends AppCompatActivity {
                 if (debugOverlay != null) {
                     debugOverlay.setConnectionStatus(true);
                 }
+                // 等待 session_started 后才开始帧捕获
                 runOnUiThread(() -> {
-                    tvStatus.setText("已连接");
-                    startFrameCapture();
+                    tvStatus.setText("等待会话...");
                 });
             }
 
@@ -309,20 +341,55 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onTranslationReceived(String text, float confidence, int[] frameRange) {
+            public void onSessionStarted(String sessionId, int fws, String pm) {
+                frameWindowSize = fws;
+                processingMode = pm;
+                Log.d("MainActivity", "Session started: id=" + sessionId
+                        + " window=" + frameWindowSize + " mode=" + processingMode);
                 runOnUiThread(() -> {
-                    // 更新翻译结果 UI
-                    buttonRecognitionText(text, confidence);
+                    tvStatus.setText("录制中...");
+                    // 收到 session_started 后启动帧捕获（本地缓存，不实时发送）
+                    startFrameCapture();
                 });
             }
 
             @Override
-            public void onStatusReceived(float gpuUtil, float latencyMs) {
-                // 可选：在调试模式显示服务器状态
+            public void onRecording(int fidx, int bufferedFrames) {
                 runOnUiThread(() -> {
-                    if (gpuUtil > 0 && latencyMs > 0) {
-                        tvStatus.setText("识别中 | " + (int) latencyMs + "ms");
+                    if (isSendingFrames) {
+                        tvStatus.setText("发送帧 (" + bufferedFrames + "/" + frameBuffer.size() + ")");
                     }
+                });
+            }
+
+            @Override
+            public void onProcessing(String sessionId, int frameIdx, int totalFrames) {
+                Log.d("MainActivity", "Processing: session=" + sessionId
+                        + " frames=" + frameIdx + "/" + totalFrames);
+                runOnUiThread(() -> {
+                    tvStatus.setText("后端处理中...");
+                    tvTranslation.setText("后端处理中，请稍候");
+                    tvTranslation.setVisibility(View.VISIBLE);
+                });
+            }
+
+            @Override
+            public void onTranslationReceived(String sessionId, int frameIdx, String result,
+                    org.json.JSONArray ragHits) {
+                // 保存翻译记录
+                TranslationRecord record = new TranslationRecord(
+                        System.currentTimeMillis(),
+                        result,
+                        frameIdx,
+                        sessionId);
+                historyManager.addRecord(record);
+                Log.d("MainActivity", "Saved translation record: " + result + " (frame=" + frameIdx + ")");
+
+                runOnUiThread(() -> {
+                    // 更新翻译结果 UI（只显示 result 文本）
+                    buttonRecognitionText(result);
+                    // 收到翻译结果后清理会话
+                    cleanupAfterTranslation();
                 });
             }
 
@@ -333,6 +400,10 @@ public class MainActivity extends AppCompatActivity {
                 }
                 runOnUiThread(() -> {
                     Toast.makeText(MainActivity.this, error, Toast.LENGTH_SHORT).show();
+                    // 出错时也清理
+                    if (isSendingFrames || isRecording) {
+                        cleanupAfterTranslation();
+                    }
                 });
             }
         });
@@ -349,44 +420,130 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 停止实时识别
+     * 停止实时识别（API (1).md 新流程）：
+     * 1. 停止帧捕获
+     * 2. 将本地缓存的帧一次性发送给后端
+     * 3. 最后一帧设 flush=true, is_final=true
+     * 4. 等待后端处理并返回翻译结果
      */
     private void stopRecognition() {
         // 停止帧捕获
         stopFrameCapture();
 
+        // 检查是否有缓存的帧需要发送
+        if (frameBuffer != null && !frameBuffer.isEmpty()) {
+            // 发送所有缓存的帧
+            sendBufferedFrames();
+        } else {
+            // 没有帧数据，直接清理
+            cleanupAfterTranslation();
+        }
+    }
+
+    /**
+     * 将本地缓存的帧一次性发送给后端
+     */
+    private void sendBufferedFrames() {
+        if (webSocketClient == null || !webSocketClient.isConnected()) {
+            Log.w("MainActivity", "Cannot send frames: not connected");
+            cleanupAfterTranslation();
+            return;
+        }
+
+        isSendingFrames = true;
+        int totalFrames = frameBuffer.size();
+        Log.d("MainActivity", "Sending " + totalFrames + " buffered frames to server");
+
+        runOnUiThread(() -> {
+            tvStatus.setText("发送帧 (0/" + totalFrames + ")");
+            btnRecord.setEnabled(false); // 发送期间禁用按钮
+        });
+
+        // 逐帧发送（不阻塞主线程）
+        new Thread(() -> {
+            try {
+                for (int i = 0; i < totalFrames; i++) {
+                    if (webSocketClient == null || !webSocketClient.isConnected()) {
+                        Log.e("MainActivity", "Connection lost while sending frames");
+                        runOnUiThread(() -> {
+                            Toast.makeText(MainActivity.this, "发送中断：连接已断开", Toast.LENGTH_SHORT).show();
+                            cleanupAfterTranslation();
+                        });
+                        return;
+                    }
+
+                    boolean isLast = (i == totalFrames - 1);
+                    String base64Image = frameBuffer.get(i);
+                    webSocketClient.sendFrame(i, base64Image, isLast, isLast);
+
+                    final int sentCount = i + 1;
+                    runOnUiThread(() -> {
+                        tvStatus.setText("发送帧 (" + sentCount + "/" + totalFrames + ")");
+                    });
+
+                    // 每帧之间稍作延迟，避免拥塞
+                    Thread.sleep(50);
+                }
+
+                Log.d("MainActivity", "All " + totalFrames + " frames sent successfully");
+                runOnUiThread(() -> {
+                    tvStatus.setText("等待后端处理...");
+                });
+            } catch (InterruptedException e) {
+                Log.e("MainActivity", "Frame sending interrupted", e);
+                runOnUiThread(() -> {
+                    cleanupAfterTranslation();
+                });
+            }
+        }).start();
+    }
+
+    /**
+     * 翻译完成或出错后的清理工作
+     */
+    private void cleanupAfterTranslation() {
         // 停止调试覆盖层
         if (debugOverlay != null) {
             debugOverlay.stop();
         }
 
-        // 断开 WebSocket
+        // 清理缓冲区
+        if (frameBuffer != null) {
+            frameBuffer.clear();
+        }
+        isSendingFrames = false;
+
+        // 断开 WebSocket（保持连接直到翻译完成）
         if (webSocketClient != null) {
             webSocketClient.disconnect();
             webSocketClient = null;
         }
 
-        // 隐藏翻译结果
-        tvTranslation.setVisibility(View.GONE);
-        tvTranslation.setText("");
-
         // 更新 UI
         isRecording = false;
         isConnected = false;
         btnRecord.setImageResource(R.drawable.ic_record_inactive_large);
+        btnRecord.setEnabled(true);
         btnSwitch.setEnabled(true);
         btnMicrophone.setEnabled(true);
         tvStatus.setText("就绪");
     }
 
     /**
-     * 启动定时帧捕获循环（10 FPS）
+     * 启动定时帧捕获循环（10 FPS）—— 帧缓存到本地，不实时发送
+     * 遵循 API (1).md 新流程：先录制缓存，停止后一次性提交
      */
     private void startFrameCapture() {
         frameCaptureRunnable = new Runnable() {
             @Override
             public void run() {
                 if (!isRecording || !isConnected) {
+                    return;
+                }
+
+                // 缓冲区安全上限检查
+                if (frameBuffer != null && frameBuffer.size() >= Config.FRAME_BUFFER_MAX_SIZE) {
+                    Log.w("MainActivity", "Frame buffer full, stopping capture");
                     return;
                 }
 
@@ -407,10 +564,10 @@ public class MainActivity extends AppCompatActivity {
                     debugOverlay.onFrameCaptured();
                 }
 
-                // 2. 运动检测 - 只在有运动时发送
+                // 2. 运动检测 - 只在有运动时缓存
                 boolean hasMotion = motionDetector.detectMotion(frameBmp);
                 if (!hasMotion) {
-                    // 静止帧，丢弃不上传
+                    // 静止帧，丢弃不缓存
                     if (debugOverlay != null) {
                         debugOverlay.onFrameSkipped();
                     }
@@ -426,10 +583,13 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                // 4. 通过 WebSocket 发送
-                webSocketClient.sendFrame(frameIdx++, base64Image, System.currentTimeMillis());
-                if (debugOverlay != null) {
-                    debugOverlay.onFrameSent(base64Image.length() / 1024);
+                // 4. 缓存帧到本地缓冲区（停止后一次性发送，遵循 API (1).md 新流程）
+                if (frameBuffer != null) {
+                    frameBuffer.add(base64Image);
+                    frameIdx++;
+                    if (debugOverlay != null) {
+                        debugOverlay.onFrameSent(base64Image.length() / 1024);
+                    }
                 }
 
                 // 继续下一帧
@@ -450,34 +610,72 @@ public class MainActivity extends AppCompatActivity {
             frameHandler.removeCallbacks(frameCaptureRunnable);
             frameCaptureRunnable = null;
         }
-        Log.d("MainActivity", "Frame capture stopped");
+        Log.d("MainActivity", "Frame capture stopped, buffered frames: "
+                + (frameBuffer != null ? frameBuffer.size() : 0));
     }
 
     /**
-     * 更新翻译结果到 UI
+     * 更新翻译结果到 UI，并在语音输出开启时朗读
      */
-    private void buttonRecognitionText(String text, float confidence) {
+    private void buttonRecognitionText(String text) {
         if (text == null || text.isEmpty()) {
             return;
         }
 
-        // 置信度过低时显示特殊提示
-        String displayText;
-        if (confidence < 0.6f || "[不确定]".equals(text)) {
-            displayText = "🤔 不确定";
-        } else {
-            displayText = text;
-        }
-
-        tvTranslation.setText(displayText);
+        tvTranslation.setText(text);
         tvTranslation.setVisibility(View.VISIBLE);
 
-        // 状态栏同时显示置信度
-        if (confidence > 0) {
-            tvStatus.setText("识别中 | " + String.format("%.0f%%", confidence * 100));
-        } else {
-            tvStatus.setText("识别中");
+        // 语音输出（如果开启）
+        if (isMicrophoneOn && textToSpeech != null) {
+            speakTranslation(text);
         }
+
+        tvStatus.setText("识别中");
+    }
+
+    // ======================== 语音合成 (TTS) ========================
+
+    /**
+     * 初始化 TextToSpeech 引擎
+     * <p>
+     * 使用 Android 内置 TTS 引擎，语种设为中文。
+     * 初始化回调中设置语速和音调。
+     */
+    private void initTextToSpeech() {
+        textToSpeech = new TextToSpeech(this, status -> {
+            if (status == TextToSpeech.SUCCESS) {
+                int langResult = textToSpeech.setLanguage(Locale.CHINESE);
+                if (langResult == TextToSpeech.LANG_MISSING_DATA
+                        || langResult == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    Log.w("MainActivity", "TTS: 中文语音数据缺失或不支持");
+                }
+                // 语速 1.0 = 正常，略慢以便手语翻译清晰
+                textToSpeech.setSpeechRate(0.9f);
+                // 音调 1.0 = 正常
+                textToSpeech.setPitch(1.0f);
+                Log.d("MainActivity", "TTS initialized: " + Locale.CHINESE);
+            } else {
+                Log.e("MainActivity", "TTS initialization failed, status=" + status);
+            }
+        });
+    }
+
+    /**
+     * 朗读翻译结果文本
+     *
+     * @param text 要朗读的中文文本
+     */
+    private void speakTranslation(String text) {
+        if (textToSpeech == null) {
+            Log.w("MainActivity", "TTS not initialized");
+            return;
+        }
+        // 停止当前正在播放的语音
+        if (textToSpeech.isSpeaking()) {
+            textToSpeech.stop();
+        }
+        // 朗读文本（不加入队列，直接抢占播放）
+        textToSpeech.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tts_" + System.currentTimeMillis());
     }
 
     // ======================== 其他控件 ========================
@@ -498,6 +696,10 @@ public class MainActivity extends AppCompatActivity {
         } else {
             btnMicrophone.setColorFilter(ContextCompat.getColor(this, android.R.color.darker_gray));
             Toast.makeText(this, "语音输出：关", Toast.LENGTH_SHORT).show();
+            // 关闭语音时立即停止正在播放的 TTS
+            if (textToSpeech != null && textToSpeech.isSpeaking()) {
+                textToSpeech.stop();
+            }
         }
     }
 
@@ -538,6 +740,12 @@ public class MainActivity extends AppCompatActivity {
         if (cameraHelper != null) {
             cameraHelper.closeCamera();
             cameraHelper.stopBackgroundThread();
+        }
+        // 释放 TTS 资源
+        if (textToSpeech != null) {
+            textToSpeech.stop();
+            textToSpeech.shutdown();
+            textToSpeech = null;
         }
     }
 

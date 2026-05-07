@@ -1,22 +1,28 @@
 """
 Android 手势识别前端 - Mock WebSocket 测试服务器
 ================================================
-模拟后端行为，用于在无真实后端时测试 App 的通信链路。
+遵循 API (1).md 协议规范（整段录制 → 一次性提交 → 后端处理 → 返回翻译）。
+
+核心流程变化（相对于旧 API.md）:
+  旧: 实时逐帧推送 → 实时返回中间翻译
+  新: 先本地缓存整段录制 → 停止后一次性提交 → 后端集中处理 → 返回最终翻译
 
 功能：
-  1. 接收 Android 发送的帧（Base64 JPEG）
-  2. 解码并保存帧图像到 received_frames/ 目录
-  3. 实时显示统计信息：帧率、大小、帧索引、时间戳
-  4. 发送模版翻译结果返回给 App（模拟后端响应）
-  5. 支持保存的帧按顺序播放生成视频（可选）
+  1. 连接后发送 session_started（含 processing_mode: "full_recording"）
+  2. 接收 Android 发送的帧序列（停止后批量提交）
+  3. 每帧回复 recording 消息（模拟服务端接收确认）
+  4. 最后一帧（flush=true + is_final=true）触发 processing + translation
+  5. 支持 ping（心跳）和 reset（重置会话）消息
+  6. 解码并保存帧图像到 received_frames/ 目录
+  7. 实时显示统计信息
 
 用法：
   pip install websockets
-  python mock_server.py
+  python mock_server.py [--fresh]
 
 Android 端 Config.java 修改（二选一）:
-  - 模拟器测试: WS_URL = "ws://10.0.2.2:8000/ws/translate"
-  - 真机同一WiFi: WS_URL = "ws://<本机IP>:8000/ws/translate"
+  - 模拟器测试: WS_URL = "ws://10.0.2.2:8000/ws"
+  - 真机同一WiFi: WS_URL = "ws://<本机IP>:8000/ws"
 """
 
 import asyncio
@@ -26,6 +32,7 @@ import os
 import base64
 import signal
 import sys
+import uuid
 from datetime import datetime
 from collections import deque
 
@@ -41,7 +48,7 @@ except ImportError:
 # ======================== 配置 ========================
 HOST = "0.0.0.0"  # 监听所有网络接口
 PORT = 8000
-PATH = "/ws/translate"  # 必须与 Config.java 中的路径一致
+PATH = "/ws"  # 必须与 API (1).md 和 Config.java 中的路径一致
 
 SAVE_FRAMES = True  # 是否将接收到的帧保存为图片
 SAVE_DIR = "received_frames"
@@ -50,7 +57,7 @@ SAVE_DIR = "received_frames"
 #   --fresh : 启动时清空 SAVE_DIR 目录（每次测试从干净状态开始）
 CLEAR_ON_START = "--fresh" in sys.argv
 
-# 模拟翻译响应配置
+# 模拟翻译响应配置（API (1).md 的 result 字段）
 MOCK_TRANSLATION_TEXTS = [
     "你好",
     "谢谢",
@@ -64,6 +71,36 @@ MOCK_TRANSLATION_TEXTS = [
     "对不起",
 ]
 
+# 模拟 rag_hits 配置（固定样本，模拟 RAG 检索结果）
+MOCK_RAG_HITS = [
+    {
+        "rank": 1,
+        "sign_gloss": "S000001_P0000_T00",
+        "semantic_text": "你好",
+        "context": "你好",
+        "distance": 0.92,
+        "video_path": "/mock/videos/S000001_P0000_T00.mp4",
+        "pose_delta_summary": {
+            "frame_delta_count": 5,
+            "delta_norm_mean": 0.0987,
+            "delta_norm_max": 0.1654
+        }
+    },
+    {
+        "rank": 2,
+        "sign_gloss": "S000002_P0001_T01",
+        "semantic_text": "您好",
+        "context": "您好",
+        "distance": 0.85,
+        "video_path": "/mock/videos/S000002_P0001_T01.mp4",
+        "pose_delta_summary": {
+            "frame_delta_count": 6,
+            "delta_norm_mean": 0.1123,
+            "delta_norm_max": 0.1987
+        }
+    }
+]
+
 # ======================== 统计信息 ========================
 stats = {
     "total_frames": 0,
@@ -73,7 +110,10 @@ stats = {
     "fps_history": deque(maxlen=30),  # 最近30帧用于计算平滑FPS
     "connected": False,
     "client_addr": None,
-    "received_texts": [],  # 用于接收非frame消息
+    "session_id": None,
+    "frame_window_size": 8,
+    "processing_mode": "full_recording",
+    "sessions_processed": 0,  # 已处理的完整录制轮次
 }
 # ======================== 帧保存 ========================
 os.makedirs(SAVE_DIR, exist_ok=True)
@@ -134,15 +174,17 @@ def print_stats_panel(initial=False):
     lines = [
         "",
         "=" * 60,
-        f"  🖥️  Mock 翻译服务器 | {HOST}:{PORT}{PATH}",
+        f"  🖥️  Mock 翻译服务器 (API (1).md 协议) | {HOST}:{PORT}{PATH}",
         f"  {'🟢 已连接' if stats['connected'] else '🔴 等待连接...'} "
         f" 客户端: {stats['client_addr'] or '无'}",
+        f"  会话: {stats['session_id'] or '无'}  模式: {stats['processing_mode']}",
         "-" * 60,
         f"  帧数       : {stats['total_frames']:>6} 帧",
         f"  实时 FPS   : {recent_fps:>6.1f}  (最近30帧平均)",
         f"  平均 FPS   : {avg_fps:>6.1f}  (总运行时间)",
         f"  数据量     : {total_mb:>6.2f} MB  ({throughput:.1f} Mbps)",
         f"  运行时间   : {elapsed:>6.1f} 秒",
+        f"  已处理轮次 : {stats['sessions_processed']:>6} 次",
         "-" * 60,
         f"  帧保存目录 : {os.path.abspath(SAVE_DIR)}" if SAVE_FRAMES else "",
         "=" * 60,
@@ -162,7 +204,7 @@ def print_stats_panel(initial=False):
 
 # ======================== 帧处理 ========================
 def process_frame_message(data):
-    """处理客户端发送的帧消息"""
+    """处理客户端发送的帧消息（API (1).md 协议）"""
     try:
         # 解析 JSON
         message = json.loads(data)
@@ -174,7 +216,9 @@ def process_frame_message(data):
             # ----- 帧消息处理 -----
             frame_idx = message.get("frame_idx", -1)
             b64_image = message.get("image_b64", "")
-            timestamp = message.get("timestamp", 0)
+            flush = message.get("flush", False)
+            is_final = message.get("is_final", False)
+
             b64_size = len(b64_image)
             raw_size = int(b64_size * 0.75)  # Base64 → 原始字节估算
 
@@ -190,9 +234,10 @@ def process_frame_message(data):
 
             # 解码并保存
             saved_path = ""
-            if SAVE_FRAMES:
+            if SAVE_FRAMES and b64_image:
                 try:
                     image_data = base64.b64decode(b64_image)
+                    timestamp = int(now * 1000)
                     saved_path = save_frame(frame_idx, image_data, timestamp)
                 except Exception as e:
                     saved_path = f"[解码失败: {e}]"
@@ -201,64 +246,92 @@ def process_frame_message(data):
             print_stats_panel(initial=False)
 
             # 每帧打印简要日志
-            ts_str = datetime.fromtimestamp(timestamp / 1000).strftime("%H:%M:%S.%f")[:-3]
+            ts_str = datetime.fromtimestamp(now).strftime("%H:%M:%S.%f")[:-3]
             img_info = f" | 保存: {os.path.basename(saved_path)}" if SAVE_FRAMES and saved_path else ""
-            print(f"  📸 帧 #{frame_idx:>4d} | {b64_size:>6d}B Base64 | 时间戳: {ts_str}{img_info}")
+            flush_info = " | FLUSH" if flush else ""
+            final_info = " | FINAL" if is_final else ""
+            print(f"  📸 帧 #{frame_idx:>4d} | {b64_size:>6d}B Base64 | {ts_str}{img_info}{flush_info}{final_info}")
 
-            return True, raw_size
+            return True, raw_size, frame_idx, flush, is_final
 
-        elif msg_type == "control":
-            # ----- 控制消息处理 -----
-            action = message.get("action", "unknown")
-            print(f"\n  🎮 收到控制消息: {action}")
-            return True, 0
+        elif msg_type == "ping":
+            # ----- 心跳 -----
+            print(f"\n  💓 收到心跳 (ping)")
+            return True, 0, -1, False, False
+
+        elif msg_type == "reset":
+            # ----- 重置会话 -----
+            print(f"\n  🔄 收到重置 (reset)")
+            stats["total_frames"] = 0
+            stats["total_bytes"] = 0
+            stats["last_frame_time"] = None
+            stats["fps_history"].clear()
+            return True, 0, -1, False, False
 
         else:
             print(f"\n  ❓ 未知消息类型: {msg_type}")
             print(f"     内容: {data[:200]}...")
-            return True, 0
+            return True, 0, -1, False, False
 
     except json.JSONDecodeError as e:
         print(f"\n  ❌ JSON 解析错误: {e}")
         print(f"     原始数据前200字符: {data[:200]}")
-        return False, 0
+        return False, 0, -1, False, False
     except Exception as e:
         print(f"\n  ❌ 处理异常: {e}")
-        return False, 0
+        return False, 0, -1, False, False
 
 
-# ======================== 生成模拟翻译响应 ========================
-def generate_mock_response(frame_idx):
-    """生成一个模拟的翻译响应"""
+# ======================== 生成模拟响应（API (1).md 协议） ========================
+def generate_recording_response(frame_idx, buffered_count):
+    """生成 recording 消息（新 API，替代旧 buffering）"""
+    return {
+        "type": "recording",
+        "session_id": stats["session_id"],
+        "frame_idx": frame_idx,
+        "buffered_frames": buffered_count,
+    }
+
+
+def generate_processing_response(total_frames):
+    """生成 processing 消息（新 API）"""
+    return {
+        "type": "processing",
+        "session_id": stats["session_id"],
+        "frame_idx": total_frames,
+        "total_frames": total_frames,
+    }
+
+
+def generate_translation_response():
+    """生成翻译结果（API (1).md 格式，含 result 和 rag_hits）"""
     import random
 
-    # 轮换不同的翻译文本
-    text_idx = frame_idx % len(MOCK_TRANSLATION_TEXTS)
-    text = MOCK_TRANSLATION_TEXTS[text_idx]
+    # 基于已处理的轮次选择翻译文本
+    text_idx = stats["sessions_processed"] % len(MOCK_TRANSLATION_TEXTS)
+    result_text = MOCK_TRANSLATION_TEXTS[text_idx]
 
-    # 模拟置信度（逐渐提高，模拟模型持续识别）
-    confidence = min(0.95, 0.5 + frame_idx * 0.01)
+    # 构造 rag_hits
+    rag_hits = []
+    for hit_template in MOCK_RAG_HITS:
+        hit = hit_template.copy()
+        hit["semantic_text"] = result_text
+        hit["context"] = result_text
+        hit["distance"] = round(random.uniform(0.80, 0.98), 2)
+        rag_hits.append(hit)
 
-    # 每 5 帧发送一次翻译结果（模拟实际推理频率）
-    if frame_idx % 5 == 0:
-        return {
-            "type": "translation",
-            "text": text,
-            "confidence": round(confidence, 2),
-            "frame_range": [max(0, frame_idx - 4), frame_idx],
-        }
-    else:
-        # 大部分帧只返回 status（模拟心跳）
-        return {
-            "type": "status",
-            "gpu_util": round(random.uniform(30, 80), 1),
-            "latency_ms": round(random.uniform(50, 200), 1),
-        }
+    return {
+        "type": "translation",
+        "session_id": stats["session_id"],
+        "frame_idx": stats["total_frames"],
+        "result": result_text,
+        "rag_hits": rag_hits,
+    }
 
 
 # ======================== WebSocket 处理器 ========================
 async def handler(websocket):
-    """处理单个 WebSocket 连接"""
+    """处理单个 WebSocket 连接（遵循 API (1).md 协议）"""
     stats["connected"] = True
     stats["client_addr"] = websocket.remote_address
     stats["start_time"] = time.time()
@@ -267,20 +340,87 @@ async def handler(websocket):
     stats["last_frame_time"] = None
     stats["fps_history"].clear()
 
+    # 生成会话 ID
+    stats["session_id"] = str(uuid.uuid4())
+    stats["frame_window_size"] = 8
+    stats["processing_mode"] = "full_recording"
+
     print_stats_panel(initial=True)
     print(f"\n  ✅ 客户端已连接: {websocket.remote_address}")
+    print(f"  🆔 会话 ID: {stats['session_id']}")
     print(f"  📁 帧将保存到: {os.path.abspath(SAVE_DIR)}")
     print()
+
+    # ---- 连接后立即发送 session_started（API (1).md 协议） ----
+    session_started_msg = {
+        "type": "session_started",
+        "session_id": stats["session_id"],
+        "frame_window_size": stats["frame_window_size"],
+        "processing_mode": stats["processing_mode"],
+    }
+    await websocket.send(json.dumps(session_started_msg))
+    print(f"  🚀 已发送 session_started (window={stats['frame_window_size']}, mode={stats['processing_mode']})")
+    print()
+
+    frame_count_in_session = 0
+    received_flush = False
 
     try:
         async for message in websocket:
             # 处理接收到的消息
-            success, raw_size = process_frame_message(message)
+            success, raw_size, frame_idx, flush, is_final = process_frame_message(message)
 
-            # 发送模拟响应
-            if success:
-                response = generate_mock_response(stats["total_frames"])
-                await websocket.send(json.dumps(response))
+            if not success:
+                continue
+
+            # 根据消息类型发送响应
+            msg_data = json.loads(message)
+            msg_type = msg_data.get("type", "")
+
+            if msg_type == "frame":
+                frame_count_in_session += 1
+
+                # ---- 1. 发送 recording 消息（替代旧 buffering） ----
+                recording_msg = generate_recording_response(frame_idx, frame_count_in_session)
+                await websocket.send(json.dumps(recording_msg))
+
+                # ---- 2. 检测是否最后一帧（flush + is_final） ----
+                if flush and is_final and not received_flush:
+                    received_flush = True
+                    total_frames = frame_count_in_session
+                    print(f"\n  🏁 收到最后帧 #{frame_idx} (flush + final)，共 {total_frames} 帧")
+
+                    # ---- 3. 发送 processing 消息（新 API） ----
+                    await asyncio.sleep(0.1)  # 模拟处理开始确认延迟
+                    processing_msg = generate_processing_response(total_frames)
+                    await websocket.send(json.dumps(processing_msg))
+                    print(f"  ⏳ 已发送 processing ({total_frames} 帧)")
+
+                    # ---- 4. 模拟后端处理延迟 ---- 
+                    print(f"  🧠 后端处理中...")
+                    await asyncio.sleep(1.5)  # 模拟推理时间
+
+                    # ---- 5. 发送最终翻译结果 ----
+                    stats["sessions_processed"] += 1
+                    translation_msg = generate_translation_response()
+                    await websocket.send(json.dumps(translation_msg))
+                    result_text = translation_msg["result"]
+                    hit_count = len(translation_msg["rag_hits"])
+                    print(f"  📝 发送翻译: \"{result_text}\" ({hit_count}个RAG命中)")
+                    print()
+
+            elif msg_type == "ping":
+                # ---- 心跳 - 无需回复 ----
+                pass
+
+            elif msg_type == "reset":
+                # ---- 重置会话 ----
+                frame_count_in_session = 0
+                received_flush = False
+                print(f"  🔄 会话已重置")
+
+            # 每帧后短暂让步，避免阻塞事件循环
+            await asyncio.sleep(0.01)
 
     except websockets.exceptions.ConnectionClosed as e:
         print(f"\n  ⚠️ 连接断开: {e.code} - {e.reason}")
@@ -289,6 +429,7 @@ async def handler(websocket):
     finally:
         stats["connected"] = False
         stats["client_addr"] = None
+        stats["session_id"] = None
         print_stats_panel(initial=False)
         print(f"\n  🔴 客户端已断开，等待新连接...")
 
@@ -299,6 +440,8 @@ async def main():
     print("=" * 60)
     print("  🚀 Mock 翻译服务器启动中...")
     print(f"  地址: ws://{HOST}:{PORT}{PATH}")
+    print(f"  协议: API (1).md (session_started / recording / processing / translation)")
+    print(f"  工作流: 整段录制 → 一次性提交 → 后端处理 → 返回翻译")
     print(f"  帧保存: {'启用' if SAVE_FRAMES else '禁用'}")
     print(f"  保存目录: {os.path.abspath(SAVE_DIR)}")
     print("=" * 60)
@@ -327,5 +470,6 @@ if __name__ == "__main__":
         print("\n\n  👋 服务器已停止")
         total_frames = stats["total_frames"]
         total_mb = stats["total_bytes"] / (1024 * 1024)
-        print(f"  本次会话统计: 接收 {total_frames} 帧, {total_mb:.2f} MB")
+        sessions = stats["sessions_processed"]
+        print(f"  本次会话统计: 处理 {sessions} 轮录制, 接收 {total_frames} 帧, {total_mb:.2f} MB")
         sys.exit(0)

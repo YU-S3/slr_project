@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#FF1C1C1C">
+
+    <!-- 标题栏 -->
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:background="#FF2D2D2D"
+        android:padding="12dp">
+
+        <ImageButton
+            android:id="@+id/btnBack"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_centerVertical="true"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_switch_camera"
+            android:rotation="180"
+            android:contentDescription="返回"
+            android:tint="@android:color/white" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerInParent="true"
+            android:text="翻译记录"
+            android:textSize="18sp"
+            android:textColor="@android:color/white"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvRecordCount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerVertical="true"
+            android:layout_alignParentEnd="true"
+            android:text="0条"
+            android:textSize="14sp"
+            android:textColor="#FFAAAAAA" />
+    </RelativeLayout>
+
+    <!-- 搜索栏 -->
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:padding="8dp"
+        android:background="#FF333333">
+
+        <EditText
+            android:id="@+id/etSearch"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_toStartOf="@+id/btnClearSearch"
+            android:hint="搜索翻译记录..."
+            android:textColorHint="#FF888888"
+            android:textColor="@android:color/white"
+            android:textSize="14sp"
+            android:background="@drawable/circular_button_background_transparent"
+            android:padding="8dp"
+            android:paddingStart="32dp"
+            android:drawableStart="@drawable/ic_history"
+            android:drawablePadding="8dp"
+            android:drawableTint="#FF888888"
+            android:imeOptions="actionSearch"
+            android:inputType="text" />
+
+        <ImageButton
+            android:id="@+id/btnClearSearch"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_centerVertical="true"
+            android:layout_alignParentEnd="true"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_gallery"
+            android:rotation="45"
+            android:contentDescription="清除搜索"
+            android:tint="#FF888888"
+            android:visibility="gone" />
+    </RelativeLayout>
+
+    <!-- 清除全部按钮 -->
+    <Button
+        android:id="@+id/btnClearAll"
+        android:layout_width="match_parent"
+        android:layout_height="36dp"
+        android:text="清除全部记录"
+        android:textSize="14sp"
+        android:textColor="#FFFF4444"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center" />
+
+    <!-- 记录列表 -->
+    <ListView
+        android:id="@+id/listViewHistory"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="#FF444444"
+        android:dividerHeight="1dp"
+        android:stackFromBottom="false"
+        android:transcriptMode="normal" />
+
+    <!-- 空状态 -->
+    <TextView
+        android:id="@+id/tvEmpty"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:text="暂无翻译记录"
+        android:textSize="16sp"
+        android:textColor="#FF666666"
+        android:visibility="gone" />
+</LinearLayout>

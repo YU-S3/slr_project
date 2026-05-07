@@ -4,6 +4,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -19,7 +20,11 @@ import java.util.concurrent.TimeUnit;
  * WebSocket 客户端管理器
  * <p>
  * 负责与后端建立 WebSocket 长连接，发送帧数据，接收翻译结果。
- * 内置自动重连机制。
+ * 协议遵循 API (1).md 规范：
+ * - 连接后服务端返回 session_started（含 processing_mode）
+ * - 帧消息含 flush / is_final 字段
+ * - 支持 ping（心跳）和 reset（重置会话）
+ * - 服务端返回 recording / processing / translation / error
  */
 public class WebSocketClient {
 
@@ -35,8 +40,13 @@ public class WebSocketClient {
     private int reconnectAttempts = 0;
     private boolean shouldReconnect = true;
 
+    /** 会话信息（从 session_started 获得） */
+    private String sessionId = null;
+    private int frameWindowSize = Config.DEFAULT_FRAME_WINDOW_SIZE;
+    private String processingMode = ""; // "full_recording" 等
+
     /**
-     * WebSocket 回调接口
+     * WebSocket 回调接口（与 API (1).md 协议对齐）
      */
     public interface WebSocketCallback {
         /** 连接成功建立 */
@@ -45,18 +55,41 @@ public class WebSocketClient {
         /** 连接断开 */
         void onDisconnected(int code, String reason);
 
-        /** 收到翻译结果 */
-        void onTranslationReceived(String text, float confidence, int[] frameRange);
+        /**
+         * 收到 session_started
+         * 
+         * @param sessionId       会话 ID
+         * @param frameWindowSize 帧窗口大小（现为信息性字段）
+         * @param processingMode  处理模式（如 "full_recording"）
+         */
+        void onSessionStarted(String sessionId, int frameWindowSize, String processingMode);
 
-        /** 收到服务器状态信息 */
-        void onStatusReceived(float gpuUtil, float latencyMs);
+        /**
+         * 收到录制进度通知（服务端 type: "recording"）
+         * 
+         * @param frameIdx       当前帧序号
+         * @param bufferedFrames 已缓冲帧数
+         */
+        void onRecording(int frameIdx, int bufferedFrames);
+
+        /**
+         * 收到后端处理中通知（服务端 type: "processing"）
+         * 
+         * @param sessionId   会话 ID
+         * @param frameIdx    总帧数
+         * @param totalFrames 总帧数
+         */
+        void onProcessing(String sessionId, int frameIdx, int totalFrames);
+
+        /** 收到翻译结果 */
+        void onTranslationReceived(String sessionId, int frameIdx, String result, JSONArray ragHits);
 
         /** 发生错误 */
         void onError(String error);
     }
 
     /**
-     * @param serverUrl WebSocket 服务器地址，例如 "ws://192.168.1.100:8000/ws/translate"
+     * @param serverUrl WebSocket 服务器地址，例如 "ws://192.168.2.32:8000/ws"
      * @param callback  事件回调
      */
     public WebSocketClient(String serverUrl, WebSocketCallback callback) {
@@ -66,8 +99,8 @@ public class WebSocketClient {
 
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(30, TimeUnit.SECONDS)
-                .writeTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(60, TimeUnit.SECONDS) // 整段录制处理可能耗时较长
+                .writeTimeout(30, TimeUnit.SECONDS)
                 .pingInterval(15, TimeUnit.SECONDS) // 心跳保活
                 .build();
     }
@@ -95,8 +128,10 @@ public class WebSocketClient {
                 connected = true;
                 reconnectAttempts = 0;
                 webSocket = ws;
+                sessionId = null;
+                processingMode = "";
 
-                // 在主线程回调
+                // 连接成功，等待服务端下发 session_started
                 mainHandler.post(() -> {
                     if (callback != null) {
                         callback.onConnected();
@@ -158,17 +193,20 @@ public class WebSocketClient {
             webSocket = null;
         }
         connected = false;
+        sessionId = null;
+        processingMode = "";
         Log.d(TAG, "WebSocket disconnected by client");
     }
 
     /**
-     * 发送一帧数据到后端
+     * 发送一帧数据到后端（遵循 API (1).md 协议）
      *
      * @param frameIdx    帧序号（从0递增）
      * @param base64Image JPEG 压缩并 Base64 编码后的图像数据
-     * @param timestamp   捕获时间戳（毫秒）
+     * @param flush       是否触发整段录制内容的最终处理
+     * @param isFinal     是否为最后一帧
      */
-    public void sendFrame(int frameIdx, String base64Image, long timestamp) {
+    public void sendFrame(int frameIdx, String base64Image, boolean flush, boolean isFinal) {
         if (!connected || webSocket == null) {
             Log.w(TAG, "Cannot send frame: not connected");
             return;
@@ -179,7 +217,8 @@ public class WebSocketClient {
             json.put("type", "frame");
             json.put("frame_idx", frameIdx);
             json.put("image_b64", base64Image);
-            json.put("timestamp", timestamp);
+            json.put("flush", flush);
+            json.put("is_final", isFinal);
 
             String message = json.toString();
             boolean sent = webSocket.send(message);
@@ -193,25 +232,62 @@ public class WebSocketClient {
     }
 
     /**
-     * 发送控制指令到后端（开始/停止识别）
-     *
-     * @param action "start" 或 "stop"
+     * 发送心跳（ping）
      */
-    public void sendControl(String action) {
+    public void sendPing() {
         if (!connected || webSocket == null) {
-            Log.w(TAG, "Cannot send control: not connected");
+            Log.w(TAG, "Cannot send ping: not connected");
             return;
         }
 
         try {
             JSONObject json = new JSONObject();
-            json.put("type", "control");
-            json.put("action", action);
+            json.put("type", "ping");
             webSocket.send(json.toString());
-            Log.d(TAG, "Control sent: " + action);
+            Log.d(TAG, "Ping sent");
         } catch (JSONException e) {
-            Log.e(TAG, "Error creating control JSON", e);
+            Log.e(TAG, "Error creating ping JSON", e);
         }
+    }
+
+    /**
+     * 发送重置会话指令
+     */
+    public void sendReset() {
+        if (!connected || webSocket == null) {
+            Log.w(TAG, "Cannot send reset: not connected");
+            return;
+        }
+
+        try {
+            JSONObject json = new JSONObject();
+            json.put("type", "reset");
+            webSocket.send(json.toString());
+            Log.d(TAG, "Reset sent");
+        } catch (JSONException e) {
+            Log.e(TAG, "Error creating reset JSON", e);
+        }
+    }
+
+    /**
+     * 获取会话 ID
+     */
+    public String getSessionId() {
+        return sessionId;
+    }
+
+    /**
+     * 获取帧窗口大小
+     */
+    public int getFrameWindowSize() {
+        return frameWindowSize;
+    }
+
+    /**
+     * 获取处理模式
+     */
+    public String getProcessingMode() {
+        return processingMode;
     }
 
     /**
@@ -224,7 +300,7 @@ public class WebSocketClient {
     // ======================== 私有方法 ========================
 
     /**
-     * 解析并处理服务器下发的 JSON 消息
+     * 解析并处理服务器下发的 JSON 消息（遵循 API (1).md 协议）
      */
     private void handleServerMessage(String text) {
         try {
@@ -232,11 +308,19 @@ public class WebSocketClient {
             String type = json.optString("type", "");
 
             switch (type) {
+                case "session_started":
+                    handleSessionStarted(json);
+                    break;
+                case "recording":
+                    // 新 API：录制中通知
+                    handleRecording(json);
+                    break;
+                case "processing":
+                    // 新 API：后端处理中通知
+                    handleProcessing(json);
+                    break;
                 case "translation":
                     handleTranslation(json);
-                    break;
-                case "status":
-                    handleStatus(json);
                     break;
                 case "error":
                     String errorMsg = json.optString("message", "未知服务器错误");
@@ -245,6 +329,10 @@ public class WebSocketClient {
                             callback.onError(errorMsg);
                         }
                     });
+                    break;
+                case "buffering":
+                    // 兼容旧 API：映射到 recording 处理
+                    handleRecording(json);
                     break;
                 default:
                     Log.w(TAG, "Unknown message type: " + type);
@@ -255,58 +343,81 @@ public class WebSocketClient {
     }
 
     /**
-     * 处理翻译结果消息
+     * 处理 session_started 消息
      */
-    private void handleTranslation(JSONObject json) throws JSONException {
-        String text = json.optString("text", "");
-        float confidence = (float) json.optDouble("confidence", 0.0);
+    private void handleSessionStarted(JSONObject json) throws JSONException {
+        sessionId = json.optString("session_id", null);
+        frameWindowSize = json.optInt("frame_window_size", Config.DEFAULT_FRAME_WINDOW_SIZE);
+        processingMode = json.optString("processing_mode", "");
 
-        // frame_range 是可选字段
-        int[] frameRange = null;
-        if (json.has("frame_range")) {
-            // 服务端可能返回 JSON 数组
-            String rangeStr = json.optString("frame_range", null);
-            if (rangeStr != null) {
-                try {
-                    // 尝试解析为 JSON 数组
-                    String clean = rangeStr.replace("[", "").replace("]", "");
-                    String[] parts = clean.split(",");
-                    if (parts.length == 2) {
-                        frameRange = new int[] {
-                                Integer.parseInt(parts[0].trim()),
-                                Integer.parseInt(parts[1].trim())
-                        };
-                    }
-                } catch (Exception e) {
-                    Log.w(TAG, "Failed to parse frame_range", e);
-                }
-            }
-        }
+        Log.d(TAG, "Session started: id=" + sessionId
+                + " window=" + frameWindowSize
+                + " mode=" + processingMode);
 
-        final String resultText = text;
-        final float resultConfidence = confidence;
-        final int[] resultRange = frameRange;
+        final String sid = sessionId;
+        final int fws = frameWindowSize;
+        final String pm = processingMode;
 
         mainHandler.post(() -> {
             if (callback != null) {
-                callback.onTranslationReceived(resultText, resultConfidence, resultRange);
+                callback.onSessionStarted(sid, fws, pm);
             }
         });
     }
 
     /**
-     * 处理服务器状态消息
+     * 处理 recording 消息（新 API）
      */
-    private void handleStatus(JSONObject json) {
-        float gpuUtil = (float) json.optDouble("gpu_util", -1);
-        float latencyMs = (float) json.optDouble("latency_ms", -1);
+    private void handleRecording(JSONObject json) {
+        int frameIdx = json.optInt("frame_idx", -1);
+        int bufferedFrames = json.optInt("buffered_frames", 0);
 
-        final float gpu = gpuUtil;
-        final float latency = latencyMs;
+        final int fidx = frameIdx;
+        final int bf = bufferedFrames;
 
         mainHandler.post(() -> {
             if (callback != null) {
-                callback.onStatusReceived(gpu, latency);
+                callback.onRecording(fidx, bf);
+            }
+        });
+    }
+
+    /**
+     * 处理 processing 消息（新 API）
+     */
+    private void handleProcessing(JSONObject json) {
+        String sid = json.optString("session_id", sessionId != null ? sessionId : "");
+        int frameIdx = json.optInt("frame_idx", -1);
+        int totalFrames = json.optInt("total_frames", 0);
+
+        final String finalSid = sid;
+        final int finalFrameIdx = frameIdx;
+        final int finalTotalFrames = totalFrames;
+
+        mainHandler.post(() -> {
+            if (callback != null) {
+                callback.onProcessing(finalSid, finalFrameIdx, finalTotalFrames);
+            }
+        });
+    }
+
+    /**
+     * 处理翻译结果消息
+     */
+    private void handleTranslation(JSONObject json) {
+        String sid = json.optString("session_id", sessionId != null ? sessionId : "");
+        int frameIdx = json.optInt("frame_idx", -1);
+        String result = json.optString("result", "");
+        JSONArray ragHits = json.optJSONArray("rag_hits");
+
+        final String finalSid = sid;
+        final int finalFrameIdx = frameIdx;
+        final String finalResult = result;
+        final JSONArray finalRagHits = ragHits;
+
+        mainHandler.post(() -> {
+            if (callback != null) {
+                callback.onTranslationReceived(finalSid, finalFrameIdx, finalResult, finalRagHits);
             }
         });
     }
